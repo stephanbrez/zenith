@@ -194,6 +194,12 @@ class HarnessConfig:
             ),
             worker_acp_command=self.worker_acp_command,
             validation_worker_acp_command=self.validator_acp_command,
+            terminal_reviewer=(
+                self.terminal_reviewer_provider
+                if self.terminal_reviewer_provider_name
+                else None
+            ),
+            terminal_reviewer_acp_command=self.terminal_reviewer_acp_command,
         )
 
     # ------------------------------------------------------------------

@@ -319,6 +319,8 @@ def _resolve_selection(
         validation_worker=get_provider(validator) if validator else None,
         worker_acp_command=worker_acp_command,
         validation_worker_acp_command=validator_acp_command,
+        terminal_reviewer=get_provider(terminal_reviewer) if terminal_reviewer else None,
+        terminal_reviewer_acp_command=terminal_reviewer_acp_command,
     )
 
 
