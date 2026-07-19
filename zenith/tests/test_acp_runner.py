@@ -21,6 +21,7 @@ from zenith_harness.acp_runner import (
     _acp_subprocess_env,
     _augment_acp_command,
     _parse_codex_c_overrides,
+    _redact_secrets,
 )
 from zenith_harness.providers import PROVIDERS
 from zenith_harness.assets import AssetLoader
@@ -264,6 +265,26 @@ def test_parse_codex_c_overrides_handles_single_quotes():
 
 def test_parse_codex_c_overrides_empty_when_no_flags():
     assert _parse_codex_c_overrides("codex-acp") == {}
+
+
+def test_redact_secrets_masks_credential_flags():
+    cmd = "codex-acp --api-key sk-secret123 --auth-token=abc.def.ghi"
+    redacted = _redact_secrets(cmd)
+    assert "sk-secret123" not in redacted
+    assert "abc.def.ghi" not in redacted
+    assert "--api-key" in redacted
+    assert "***" in redacted
+
+
+def test_redact_secrets_masks_env_style_assignments():
+    redacted = _redact_secrets('CODEX_CONFIG={"password": "hunter2"}')
+    assert "hunter2" not in redacted
+    assert "***" in redacted
+
+
+def test_redact_secrets_leaves_non_credential_config_untouched():
+    cmd = 'codex-acp -c model="gpt-5.6-luna" -c sandbox_mode="danger-full-access"'
+    assert _redact_secrets(cmd) == cmd
 
 
 def test_codex_acp_env_preserves_custom_model_from_command():

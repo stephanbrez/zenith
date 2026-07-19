@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import logging
 import os
+import sys
 from typing import Annotated, Any
 
 from fastmcp import Context, FastMCP
@@ -430,6 +431,18 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=0)  # 0 → ephemeral
     args = parser.parse_args()
+
+    # Opt-in audit logging via ZENITH_LOG_LEVEL (e.g. INFO). Default
+    # WARNING keeps normal operation quiet. Logs go to stderr, which
+    # the MCP stdio transport keeps separate from the JSON-RPC stdout
+    # channel. Useful for tracing ACP spawn config (acp_runner emits
+    # the augmented command + CODEX_CONFIG per dispatch).
+    log_level = os.environ.get("ZENITH_LOG_LEVEL", "WARNING").upper()
+    logging.basicConfig(
+        level=getattr(logging, log_level, logging.WARNING),
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        stream=sys.stderr,
+    )
 
     if args.mode == "orchestrator":
         config = HarnessConfig.discover()
