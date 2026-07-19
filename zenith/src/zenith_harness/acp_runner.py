@@ -132,6 +132,29 @@ def _parse_codex_c_overrides(command: str) -> dict[str, str]:
     return dict(_CODEX_C_OVERRIDE_RE.findall(command))
 
 
+# Values of flags/keys whose *name* looks like a credential are masked
+# before a command line or CODEX_CONFIG JSON is logged. ZENITH_*_ACP_COMMAND
+# is user-controlled and may embed tokens; the spawn log is opt-in (INFO) but
+# must not surface obvious secrets. Best-effort by design — it masks by key
+# name, not by detecting secret-shaped values.
+_SECRET_RE = re.compile(
+    r"([\w-]*(?:key|token|secret|password|passwd|auth|credential)[\w-]*"
+    r'["\']?\s*[=:\s]\s*["\']?)([^\s"\']+)',
+    re.IGNORECASE,
+)
+
+
+def _redact_secrets(text: str) -> str:
+    """Mask credential-looking values in a string before logging it.
+
+    Replaces the value following any ``key``/``token``/``secret``/``auth``
+    style flag or assignment with ``***``, leaving the flag name intact so
+    the log stays useful. Non-credential config (e.g. ``-c model="..."``) is
+    untouched.
+    """
+    return _SECRET_RE.sub(lambda m: m.group(1) + "***", text)
+
+
 def _acp_subprocess_env(
     provider,
     reasoning_effort: str | None = None,
@@ -690,17 +713,28 @@ class ACPNodeRunner:
         )
 
         # 3) Spawn the ACP agent.
+        acp_env = _acp_subprocess_env(
+            role_config.worker_provider,
+            role_config.worker_reasoning_effort,
+            acp_command,
+        )
+        logger.info(
+            "ACP spawn for node %s (role=%s, provider=%s, effort=%s): "
+            "command=%r, CODEX_CONFIG=%s",
+            task.id,
+            "validator" if task.type == "validate" else "worker",
+            role_config.worker_provider.name,
+            role_config.worker_reasoning_effort,
+            _redact_secrets(acp_command),
+            _redact_secrets(acp_env.get("CODEX_CONFIG", "<none>")),
+        )
         process = await asyncio.create_subprocess_shell(
             acp_command,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=workspace_dir,
-            env=_acp_subprocess_env(
-                role_config.worker_provider,
-                role_config.worker_reasoning_effort,
-                acp_command,
-            ),
+            env=acp_env,
             limit=SUBPROCESS_STREAM_LIMIT,
         )
         progress_tracker = ACPProgressTracker(callback=progress_callback)
@@ -852,17 +886,27 @@ class ACPNodeRunner:
             workspace_dir=workspace_dir,
         )
 
+        # 3) Spawn the ACP agent.
+        acp_env = _acp_subprocess_env(
+            role_config.worker_provider,
+            role_config.worker_reasoning_effort,
+            acp_command,
+        )
+        logger.info(
+            "ACP spawn for terminal review (provider=%s, effort=%s): "
+            "command=%r, CODEX_CONFIG=%s",
+            role_config.worker_provider.name,
+            role_config.worker_reasoning_effort,
+            _redact_secrets(acp_command),
+            _redact_secrets(acp_env.get("CODEX_CONFIG", "<none>")),
+        )
         process = await asyncio.create_subprocess_shell(
             acp_command,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=workspace_dir,
-            env=_acp_subprocess_env(
-                role_config.worker_provider,
-                role_config.worker_reasoning_effort,
-                acp_command,
-            ),
+            env=acp_env,
             limit=SUBPROCESS_STREAM_LIMIT,
         )
         tracker = ACPProgressTracker(callback=progress_callback)

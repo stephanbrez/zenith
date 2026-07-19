@@ -108,6 +108,15 @@ First read .claude/orchestrator_prompt.md and treat it as your primary role, the
 <your instruction or query>
 ```
 
+**Debugging**
+
+Zenith logs at `WARNING` by default. To trace how workers are launched, set
+`ZENITH_LOG_LEVEL=INFO` before starting the orchestrator: each ACP dispatch
+then logs the augmented spawn command and the resolved `CODEX_CONFIG` to
+stderr (credential-looking values are masked). This is the fastest way to
+confirm that per-role reasoning effort and `-c` overrides actually reach the
+codex-acp adapter.
+
 ## How Zenith Works
 
 <p align="center">
