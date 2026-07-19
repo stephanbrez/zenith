@@ -5,6 +5,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -118,13 +119,46 @@ def _augment_acp_command(
     return command
 
 
-def _acp_subprocess_env(provider) -> dict[str, str]:
+_CODEX_C_OVERRIDE_RE = re.compile(r'-c\s+(\w+)=["\']([^"\']*)["\']')
+
+
+def _parse_codex_c_overrides(command: str) -> dict[str, str]:
+    """Extract -c key="value" overrides from a codex-acp command string.
+
+    Both _augment_acp_command and user-supplied ZENITH_*_ACP_COMMAND values
+    splice config via `-c key="value"`. The npm codex-acp adapter ignores
+    argv `-c` flags (issue #27), so we re-route them into CODEX_CONFIG.
+    """
+    return dict(_CODEX_C_OVERRIDE_RE.findall(command))
+
+
+def _acp_subprocess_env(
+    provider,
+    reasoning_effort: str | None = None,
+    acp_command: str | None = None,
+) -> dict[str, str]:
     """Build the env handed to an ACP-agent subprocess.
 
     For codex we preserve PATH so node-based ACP adapters can launch via
-    `/usr/bin/env node`, and pass sandbox-disable hints through env. The
-    command line also receives `sandbox_mode="danger-full-access"` in
-    `_augment_acp_command`.
+    `/usr/bin/env node`, and pass sandbox-disable hints through env.
+
+    The npm `@agentclientprotocol/codex-acp` adapter (v1.1.0) does not
+    parse `-c` overrides from argv — it reads configuration from the
+    `CODEX_CONFIG` env var (JSON). We build it here in three layers,
+    each overriding the previous:
+
+    1. User-supplied `CODEX_CONFIG` (ambient env, e.g. `{"model": "..."}`).
+    2. `-c` overrides parsed from the augmented command string — these
+       include the user's custom model from `ZENITH_*_ACP_COMMAND` and
+       the sandbox/approval/effort flags appended by
+       `_augment_acp_command`.
+    3. Zenith's three safety keys (`sandbox_mode`, `approval_policy`,
+       `model_reasoning_effort`) — always win, since sandbox/approval
+       are autonomy-safety requirements and effort is the per-role
+       resolved value.
+
+    The `-c` flags remain in argv for `-c`-honoring codex-acp builds
+    (harmless if ignored by the npm adapter).
 
     For hermes the env is passed through unchanged.
     """
@@ -134,6 +168,30 @@ def _acp_subprocess_env(provider) -> dict[str, str]:
         # Env-var hints — harmless if codex ignores them.
         env["CODEX_SANDBOX"] = "danger-full-access"
         env["CODEX_DISABLE_SANDBOX"] = "1"
+        # The npm codex-acp adapter reads CODEX_CONFIG (JSON) for its
+        # configuration, not argv `-c` overrides. Build it in three
+        # layers so the user's custom model (from the command string)
+        # is preserved alongside zenith's safety config.
+        effort = reasoning_effort or "xhigh"
+        codex_config: dict[str, Any] = {}
+        # Layer 1: user-supplied CODEX_CONFIG.
+        existing = env.get("CODEX_CONFIG")
+        if existing:
+            try:
+                parsed = json.loads(existing)
+                if isinstance(parsed, dict):
+                    codex_config = parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+        # Layer 2: -c overrides from the augmented command string
+        # (carries the user's custom model + zenith's -c flags).
+        if acp_command:
+            codex_config.update(_parse_codex_c_overrides(acp_command))
+        # Layer 3: zenith's safety keys always win.
+        codex_config["sandbox_mode"] = "danger-full-access"
+        codex_config["approval_policy"] = "never"
+        codex_config["model_reasoning_effort"] = effort
+        env["CODEX_CONFIG"] = json.dumps(codex_config)
     # hermes: no special env needed
     return env
 
@@ -638,7 +696,11 @@ class ACPNodeRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=workspace_dir,
-            env=_acp_subprocess_env(role_config.worker_provider),
+            env=_acp_subprocess_env(
+                role_config.worker_provider,
+                role_config.worker_reasoning_effort,
+                acp_command,
+            ),
             limit=SUBPROCESS_STREAM_LIMIT,
         )
         progress_tracker = ACPProgressTracker(callback=progress_callback)
@@ -796,7 +858,11 @@ class ACPNodeRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=workspace_dir,
-            env=_acp_subprocess_env(role_config.worker_provider),
+            env=_acp_subprocess_env(
+                role_config.worker_provider,
+                role_config.worker_reasoning_effort,
+                acp_command,
+            ),
             limit=SUBPROCESS_STREAM_LIMIT,
         )
         tracker = ACPProgressTracker(callback=progress_callback)
