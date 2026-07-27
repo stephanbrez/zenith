@@ -35,6 +35,10 @@ Stop filing upstream PRs entirely (pulling continues) when **any** fires:
    gate/ownership changes (`revalidates`, `follow_up`, `file_finding`).
 3. A change here gets **designed differently than wanted** just to stay
    mergeable upstream.
+4. A PR from this fork is **rejected on design direction** (not on
+   mechanics like "rebase" or "split this up") — the review channel works
+   but points away from where this fork is going; split off rather than
+   argue.
 
 If a tripwire fires: keep this file as the delta record, keep cherry-picking
 upstream work with authorship intact, and do not rename/detach the fork —
