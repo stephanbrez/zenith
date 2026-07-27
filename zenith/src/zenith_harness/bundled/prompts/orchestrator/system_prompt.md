@@ -390,14 +390,15 @@ Runtime coverage semantics are strict: every live contract assertion must have e
 - `patch`: required only when `action == "patch"`.
 - `justification`: required reasoning for the decision, especially accepted risk, scope change, retry, patch, next mission, or abort.
 
-`TaskListPatch` supports four operations:
+`TaskListPatch` supports five operations:
 
 - `add_items`: new assertion ids. Matching `contract/<ID>.md` files must already exist before `decide_attention`.
 - `add`: new tasks with globally new ids.
 - `supersede`: map old task id to replacement task id. The replacement must already exist or be included in `add`; downstream `depends_on` references are rewritten to the replacement.
 - `cancel`: retire task ids without replacement; downstream `depends_on` references are dropped.
+- `follow_up`: map a CLEARED work task id to a new work task taking over the targets both declare. The cleared task, its attempts, and its dependents stay untouched; the new task becomes the active owner for coverage. Use this when a cleared task's assertions need more work — not a targetless fix task, and not piling work onto whichever task is still open.
 
-There is no in-place task edit primitive. To change a task body, skill, targets, or dependencies, supersede the task. Cleared or running tasks cannot be superseded or cancelled.
+There is no in-place task edit primitive. To change a task body, skill, targets, or dependencies, supersede the task. Cleared or running tasks cannot be superseded or cancelled; a cleared work task's ownership moves only through `follow_up`.
 
 ## Anti-Patterns
 

@@ -113,7 +113,7 @@ class TaskList(BaseModel):
 
 
 class TaskListPatch(BaseModel):
-    """Four ops. See `specs/task_list/PRODUCT.md` §Patching.
+    """Five ops. See `specs/task_list/PRODUCT.md` §Patching.
 
     - `add_items`: new assertion ids (contract files must exist on disk).
     - `add`: new tasks appended to the task list.
@@ -124,6 +124,10 @@ class TaskListPatch(BaseModel):
       `superseded`; **every `depends_on` list is rewritten to drop the
       cancelled id**. Use when a planned task is no longer needed (wrong
       authoring, scope retraction, dead-end discovered).
+    - `follow_up`: dict mapping cleared work task id → new work task id.
+      Transfers active ownership of the intersecting targets; the cleared
+      task, its attempts, and its status stay immutable, and downstream
+      `depends_on` is NOT rewritten — the cleared task really did run.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -155,10 +159,26 @@ class TaskListPatch(BaseModel):
             "Cleared/running tasks cannot be cancelled."
         ),
     )
+    follow_up: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Cleared work task id → new work task id taking over the targets "
+            "both declare. Use when a cleared task's assertions need more work: "
+            "history stays sealed, the new task becomes the active owner, and "
+            "coverage validation accepts the transfer instead of reporting a "
+            "duplicate owner. Downstream `depends_on` is not rewritten."
+        ),
+    )
 
     @property
     def is_empty(self) -> bool:
-        return not (self.add_items or self.add or self.supersede or self.cancel)
+        return not (
+            self.add_items
+            or self.add
+            or self.supersede
+            or self.cancel
+            or self.follow_up
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +390,9 @@ class TaskStateEntry(BaseModel):
 
     status: TaskStatus = "pending"
     last_attempt: str | None = None  # spawn_ts of most recent dispatch
+    # `follow_up` provenance: id of the task that took over this cleared
+    # task's intersecting targets. The task itself stays immutable/cleared.
+    followed_up_by: str | None = None
 
 
 class TaskStateFile(BaseModel):
@@ -397,6 +420,14 @@ class TaskStateFile(BaseModel):
     def set_last_attempt(self, task_id: str, spawn_ts: str) -> None:
         entry = self.tasks.setdefault(task_id, TaskStateEntry())
         entry.last_attempt = spawn_ts
+
+    def followed_up_by_of(self, task_id: str) -> str | None:
+        entry = self.tasks.get(task_id)
+        return entry.followed_up_by if entry else None
+
+    def set_followed_up_by(self, task_id: str, new_task_id: str) -> None:
+        entry = self.tasks.setdefault(task_id, TaskStateEntry())
+        entry.followed_up_by = new_task_id
 
 
 class ContractStateEntry(BaseModel):

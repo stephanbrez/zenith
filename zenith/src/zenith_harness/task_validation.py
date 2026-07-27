@@ -251,6 +251,10 @@ def check_coverage(
 ) -> list[ValidationError]:
     """Every assertion ↔ exactly one non-superseded work task.
 
+    A cleared work task with `followed_up_by` set (the `follow_up` patch
+    op) stops counting as owner for the targets its follow-up task
+    declares — ownership transferred; only the follow-up task counts.
+
     Also rejects:
     - `task_targets_unknown_assertion`: a task references an assertion id not
       present in the contract directory.
@@ -258,6 +262,7 @@ def check_coverage(
     - `over_covered_assertion`: an assertion has >1 fulfilling work tasks.
     """
     errors: list[ValidationError] = []
+    by_id = {t.id: t for t in tl.tasks}
     coverers: dict[str, list[str]] = {a: [] for a in contract_ids}
     for task in tl.tasks:
         status = "pending"
@@ -272,8 +277,14 @@ def check_coverage(
                     )
                 )
         if task.type == "work" and status != "superseded":
+            transferred: set[str] = set()
+            if task_status is not None:
+                follow_id = task_status.followed_up_by_of(task.id)
+                follow_task = by_id.get(follow_id) if follow_id else None
+                if follow_task is not None:
+                    transferred = set(follow_task.targets)
             for tgt in task.targets:
-                if tgt in coverers:
+                if tgt in coverers and tgt not in transferred:
                     coverers[tgt].append(task.id)
     for assertion, tasks in coverers.items():
         if not tasks:

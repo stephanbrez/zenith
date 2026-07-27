@@ -182,6 +182,17 @@ def apply_patch(
             errors.append(ValidationError("unknown_cancel_target", old_id))
             continue
         _check_retirable(task_state, sealed, old_id, errors, op="cancel")
+
+    _check_follow_up(
+        tl,
+        task_state,
+        sealed,
+        patch,
+        existing_ids=existing_ids,
+        cancel_set=cancel_set,
+        supersede_keys=supersede_keys,
+        errors=errors,
+    )
     if errors:
         return tl, task_state, contract_ids, errors
 
@@ -200,6 +211,10 @@ def apply_patch(
         patched_state.set_status(old_id, "superseded")
     for task in patch.add:
         patched_state.set_status(task.id, "pending")
+    # follow_up transfers ownership only: the cleared task keeps its status
+    # and attempts; provenance lands in task state, not on the Task itself.
+    for old_id, new_id in patch.follow_up.items():
+        patched_state.set_followed_up_by(old_id, new_id)
 
     patched_contract = set(contract_ids) | set(patch.add_items)
 
@@ -224,6 +239,97 @@ def apply_patch(
         return tl, task_state, contract_ids, errs
 
     return patched_tl, patched_state, patched_contract, []
+
+
+def _check_follow_up(
+    tl: TaskList,
+    task_state: TaskStateFile,
+    sealed: set[str],
+    patch: TaskListPatch,
+    *,
+    existing_ids: set[str],
+    cancel_set: set[str],
+    supersede_keys: set[str],
+    errors: list[ValidationError],
+) -> None:
+    """`follow_up` transfers ownership from a CLEARED work task.
+
+    The cleared task stays immutable — this is the legal alternative to
+    the forbidden supersede-on-cleared. Pending/failed tasks must use
+    `supersede` instead; sealed history stays untouchable.
+    """
+    by_id = {t.id: t for t in tl.tasks}
+    added_by_id = {t.id: t for t in patch.add}
+    for old_id, new_id in patch.follow_up.items():
+        if old_id == new_id:
+            errors.append(ValidationError("follow_up_self", old_id))
+            continue
+        if old_id in cancel_set or old_id in supersede_keys:
+            errors.append(
+                ValidationError(
+                    "follow_up_retire_overlap",
+                    f"{old_id} also superseded/cancelled in the same patch",
+                )
+            )
+            continue
+        old = by_id.get(old_id)
+        if old is None:
+            errors.append(ValidationError("unknown_follow_up_target", old_id))
+            continue
+        if old.type != "work":
+            errors.append(
+                ValidationError(
+                    "follow_up_non_work",
+                    f"{old_id} (type={old.type})",
+                )
+            )
+            continue
+        if task_state.status_of(old_id) != "cleared":
+            errors.append(
+                ValidationError(
+                    "follow_up_requires_cleared",
+                    f"{old_id} (status={task_state.status_of(old_id)}); "
+                    "use supersede for tasks that have not cleared",
+                )
+            )
+            continue
+        if old_id in sealed:
+            errors.append(
+                ValidationError("follow_up_inside_sealed_subgraph", old_id)
+            )
+            continue
+        new = by_id.get(new_id) or added_by_id.get(new_id)
+        if new is None or new_id not in (existing_ids | set(added_by_id)):
+            errors.append(
+                ValidationError(
+                    "follow_up_new_id_unknown",
+                    f"{old_id} -> {new_id} (new id not in add[] or existing tasks)",
+                )
+            )
+            continue
+        if new_id in cancel_set:
+            errors.append(
+                ValidationError(
+                    "follow_up_target_cancelled",
+                    f"{old_id} -> {new_id}",
+                )
+            )
+            continue
+        if new.type != "work":
+            errors.append(
+                ValidationError(
+                    "follow_up_target_non_work",
+                    f"{old_id} -> {new_id} (type={new.type})",
+                )
+            )
+            continue
+        if not set(old.targets).intersection(new.targets):
+            errors.append(
+                ValidationError(
+                    "follow_up_without_shared_target",
+                    f"{old_id} -> {new_id}",
+                )
+            )
 
 
 def _check_gate_supersede_coverage(
