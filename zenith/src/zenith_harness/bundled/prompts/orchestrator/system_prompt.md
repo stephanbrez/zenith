@@ -314,6 +314,8 @@ Be especially careful with `continue`: for failed task or failed gate reports, r
 
 When adding new assertion ids in a patch, write matching `contract/<ID>.md` files before calling `decide_attention`. When changing a task body, skill, targets, or dependencies, supersede the task rather than pretending it was edited in place. Do not silently mutate cleared or running work.
 
+When a gate fails on validator dissent and the defect is then remediated, do not `continue` past the dissent and do not supersede the gate to detach the dissenting lane. Patch in a new validate task that re-audits the corrected artifact with `revalidates: [<dissenting task id>]` and depends on the remediation; gates then score the shared targets from the new lane's verdicts while the superseded dissent stays visible in the gate record. Declare `revalidates` only for a lane re-checking the same thing after a fix — never to silence a genuinely parallel lane auditing the same target from a different angle.
+
 When worker reports mention discovered issues, skipped verification, unfinished work, or skill feedback, classify each item. Either patch the relevant contract/task/skill/guidance, record an accepted risk or non-goal decision, or prove it is unrelated pre-existing behavior. Do not bury these reports in closure prose.
 
 When validator evidence conflicts with a worker claim, validator evidence wins. When validator verdict conflicts with raw artifacts or the contract evidence floor, raw evidence and contract requirements win; patch revalidation or contract/setup clarification instead of accepting a convenient pass.

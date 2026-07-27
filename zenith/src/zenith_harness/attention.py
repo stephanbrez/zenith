@@ -75,11 +75,13 @@ def _validator_summary_lines(
     targets: list[str],
     validator_verdicts: dict[str, dict[str, bool]],
     missing_items: dict[str, list[str]] | None = None,
+    superseded_verdicts: dict[str, dict[str, bool]] | None = None,
 ) -> list[str]:
     """Human-readable per-validator summary for the gate report."""
     summary: list[str] = []
     target_set = set(targets)
     missing_items = missing_items or {}
+    superseded_verdicts = superseded_verdicts or {}
     for vid in sorted(validator_verdicts):
         verdicts = validator_verdicts[vid]
         covered = [t for t in targets if t in verdicts]
@@ -88,13 +90,21 @@ def _validator_summary_lines(
             continue
         passed = sum(1 for t in covered if verdicts[t])
         miss_set = set(missing_items.get(vid, []))
+        sup_set = set(superseded_verdicts.get(vid, {}))
         flags: list[str] = []
-        dissenting = [t for t in covered if not verdicts[t] and t not in miss_set]
-        missing = [t for t in covered if t in miss_set]
+        dissenting = [
+            t
+            for t in covered
+            if not verdicts[t] and t not in miss_set and t not in sup_set
+        ]
+        missing = [t for t in covered if t in miss_set and t not in sup_set]
+        superseded = [t for t in covered if t in sup_set]
         if dissenting:
             flags.append(f"dissenting: {', '.join(dissenting)}")
         if missing:
             flags.append(f"missing: {', '.join(missing)}")
+        if superseded:
+            flags.append(f"superseded: {', '.join(superseded)}")
         flag_text = f" ({'; '.join(flags)})" if flags else ""
         summary.append(
             f"- {vid}: {passed}/{len(covered)} passed over {len(target_set)} target(s){flag_text}"
@@ -110,10 +120,12 @@ def _gate_report(
     failed_items: list[str] | None = None,
     validator_verdicts: dict[str, dict[str, bool]] | None = None,
     missing_items: dict[str, list[str]] | None = None,
+    superseded_verdicts: dict[str, dict[str, bool]] | None = None,
 ) -> str:
     failed_items = failed_items or []
     validator_verdicts = validator_verdicts or {}
     missing_items = missing_items or {}
+    superseded_verdicts = superseded_verdicts or {}
     title = (
         f"Gate checkpoint from {gate.id}"
         if cleared
@@ -136,8 +148,18 @@ def _gate_report(
     if failed_items:
         lines.append(f"failed_items: {', '.join(failed_items)}")
     lines.extend(["", "validator summary:"])
-    summary = _validator_summary_lines(gate.targets, validator_verdicts, missing_items)
+    summary = _validator_summary_lines(
+        gate.targets, validator_verdicts, missing_items, superseded_verdicts
+    )
     lines.extend(summary or ["- (no validator verdicts)"])
+    if superseded_verdicts:
+        lines.extend(["", "superseded verdicts (historical, not blocking):"])
+        for vid in sorted(superseded_verdicts):
+            for tgt in sorted(superseded_verdicts[vid]):
+                verdict = "passed" if superseded_verdicts[vid][tgt] else "failed"
+                lines.append(
+                    f"- {vid}: {tgt}={verdict} (superseded by revalidation)"
+                )
     return "\n".join(lines)
 
 
@@ -149,6 +171,7 @@ def gate_failed(
     failed_items: list[str] | None = None,
     validator_verdicts: dict[str, dict[str, bool]] | None = None,
     missing_items: dict[str, list[str]] | None = None,
+    superseded_verdicts: dict[str, dict[str, bool]] | None = None,
 ) -> AttentionItemInternal:
     failed_items = failed_items or []
     validator_verdicts = validator_verdicts or {}
@@ -165,6 +188,7 @@ def gate_failed(
             failed_items=failed_items,
             validator_verdicts=validator_verdicts,
             missing_items=missing_items,
+            superseded_verdicts=superseded_verdicts,
         ),
     )
 
@@ -174,6 +198,7 @@ def gate_checkpoint(
     gate: Task,
     *,
     validator_verdicts: dict[str, dict[str, bool]] | None = None,
+    superseded_verdicts: dict[str, dict[str, bool]] | None = None,
 ) -> AttentionItemInternal:
     validator_verdicts = validator_verdicts or {}
     return AttentionItemInternal(
@@ -185,6 +210,7 @@ def gate_checkpoint(
             gate,
             cleared=True,
             validator_verdicts=validator_verdicts,
+            superseded_verdicts=superseded_verdicts,
         ),
     )
 

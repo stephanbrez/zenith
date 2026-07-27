@@ -500,12 +500,19 @@ class MissionCoordinator:
         return None
 
     def _evaluate_gate(self, tl: TaskList, gate: Task) -> "_GateResult":
-        """AND-semantics gate evaluation.
+        """AND-semantics gate evaluation with explicit revalidation.
 
         For each gate target, every covering validator must report
         passed=True. Any single dissent blocks the gate. A validator
         "covers" a target when the validator task was authored with that
         target in `task.targets`; missing expected items count as passed=False.
+
+        A lane declaring `revalidates: [old]` supersedes `old`'s verdicts
+        for the targets both lanes cover: the superseded verdict is removed
+        from the AND but kept in `superseded_verdicts` so the gate record
+        still shows that the target once failed. Supersession is only ever
+        declared, never inferred from recency — parallel lanes auditing one
+        target from different angles must all keep counting.
         """
         mid = self._lookup_mid_for_state()
         validate_preds = self._upstream_validators(tl, gate.id)
@@ -556,6 +563,15 @@ class MissionCoordinator:
                 missing_items[v_task_id] = missing
             validator_verdicts[v_task_id] = verdicts
 
+        superseded_pairs = self._superseded_verdict_pairs(
+            by_id, validate_preds, validator_verdicts
+        )
+        superseded_verdicts: dict[str, dict[str, bool]] = {}
+        for vid, tgt in superseded_pairs:
+            verds = validator_verdicts.get(vid, {})
+            if tgt in verds:
+                superseded_verdicts.setdefault(vid, {})[tgt] = verds[tgt]
+
         item_passed: dict[str, bool] = {}
         uncovered: list[str] = []
         for tgt in gate.targets:
@@ -563,11 +579,14 @@ class MissionCoordinator:
                 vid for vid, verds in validator_verdicts.items()
                 if tgt in verds
             ]
-            if not covering:
+            live = [
+                vid for vid in covering if (vid, tgt) not in superseded_pairs
+            ]
+            if not live:
                 uncovered.append(tgt)
                 continue
             item_passed[tgt] = all(
-                validator_verdicts[vid][tgt] for vid in covering
+                validator_verdicts[vid][tgt] for vid in live
             )
 
         if uncovered:
@@ -580,6 +599,7 @@ class MissionCoordinator:
                 validator_verdicts=validator_verdicts,
                 attempt_paths=attempt_paths,
                 missing_items=missing_items,
+                superseded_verdicts=superseded_verdicts,
             )
         if all(item_passed.values()):
             return _GateResult(
@@ -587,16 +607,20 @@ class MissionCoordinator:
                 validator_verdicts=validator_verdicts,
                 attempt_paths=attempt_paths,
                 missing_items=missing_items,
+                superseded_verdicts=superseded_verdicts,
             )
         failed = [k for k, v in item_passed.items() if not v]
         dissent_detail: list[str] = []
         for tgt in failed:
             dissenters = [
                 vid for vid, verds in validator_verdicts.items()
-                if verds.get(tgt) is False and tgt not in missing_items.get(vid, [])
+                if verds.get(tgt) is False
+                and tgt not in missing_items.get(vid, [])
+                and (vid, tgt) not in superseded_pairs
             ]
             omitters = [
-                vid for vid, miss in missing_items.items() if tgt in miss
+                vid for vid, miss in missing_items.items()
+                if tgt in miss and (vid, tgt) not in superseded_pairs
             ]
             parts: list[str] = []
             if dissenters:
@@ -611,14 +635,46 @@ class MissionCoordinator:
             validator_verdicts=validator_verdicts,
             attempt_paths=attempt_paths,
             missing_items=missing_items,
+            superseded_verdicts=superseded_verdicts,
         )
+
+    @staticmethod
+    def _superseded_verdict_pairs(
+        by_id: dict[str, Task],
+        validate_preds: list[str],
+        validator_verdicts: dict[str, dict[str, bool]],
+    ) -> set[tuple[str, str]]:
+        """(validator_id, target) pairs whose verdicts are superseded.
+
+        Only lanes that themselves cover this gate can supersede — a
+        revalidating lane outside the gate's upstream chain contributes no
+        replacement verdict, so the old dissent must keep counting.
+        """
+        pairs: set[tuple[str, str]] = set()
+        for v_task_id in validate_preds:
+            v_task = by_id.get(v_task_id)
+            if v_task is None or not v_task.revalidates:
+                continue
+            if v_task_id not in validator_verdicts:
+                continue
+            for old_id in v_task.revalidates:
+                old_task = by_id.get(old_id)
+                if old_task is None:
+                    continue
+                shared = set(v_task.targets).intersection(old_task.targets)
+                for tgt in shared:
+                    pairs.add((old_id, tgt))
+        return pairs
 
     def _upstream_validators(self, tl: TaskList, gate_id: str) -> list[str]:
         """Transitive predecessors of `gate_id` that are validate tasks.
 
-        Patches rewrite `depends_on` in-place when they supersede/cancel,
-        so the gate's reachable chain never includes retired validators —
-        no status filtering needed here.
+        Patches rewrite `depends_on` in-place when they supersede/cancel
+        pending/failed validators, but a CLEARED validator can never be
+        retired (`supersede_cleared_task`), so the reachable chain keeps
+        every lane that ever ran — including dissenting ones. Verdict
+        supersession is therefore handled explicitly in `_evaluate_gate`
+        via `Task.revalidates`, not by graph pruning or status filtering.
         """
         by_id = {t.id: t for t in tl.tasks}
         gate = by_id.get(gate_id)
@@ -718,6 +774,7 @@ class MissionCoordinator:
                         mid,
                         event.gate,
                         validator_verdicts=event.result.validator_verdicts,
+                        superseded_verdicts=event.result.superseded_verdicts,
                     )
                 ]
             )
@@ -737,6 +794,7 @@ class MissionCoordinator:
                         failed_items=event.result.failed_items or [],
                         validator_verdicts=event.result.validator_verdicts,
                         missing_items=event.result.missing_items,
+                        superseded_verdicts=event.result.superseded_verdicts,
                     )
                 ]
             )
@@ -873,6 +931,9 @@ class _GateResult:
     validator_verdicts: dict[str, dict[str, bool]] = field(default_factory=dict)
     attempt_paths: dict[str, str] = field(default_factory=dict)
     missing_items: dict[str, list[str]] = field(default_factory=dict)
+    # verdicts removed from the AND by an explicit `revalidates`
+    # declaration; kept so the seal record shows the original failure.
+    superseded_verdicts: dict[str, dict[str, bool]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

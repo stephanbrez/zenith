@@ -25,6 +25,7 @@ from .task_validation import (
     check_acyclic,
     check_coverage,
     check_deps_resolve,
+    check_revalidates,
     check_task_ids,
     check_task_shape,
 )
@@ -171,6 +172,10 @@ def apply_patch(
                     f"{old_id} -> {new_id} (new id is being cancelled by the same patch)",
                 )
             )
+        else:
+            _check_gate_supersede_coverage(
+                tl, patch, old_id, new_id, errors
+            )
 
     for old_id in patch.cancel:
         if old_id not in existing_ids:
@@ -208,6 +213,9 @@ def apply_patch(
     errs = check_deps_resolve(patched_tl)
     if errs:
         return tl, task_state, contract_ids, errs
+    errs = check_revalidates(patched_tl)
+    if errs:
+        return tl, task_state, contract_ids, errs
     errs = check_acyclic(patched_tl)
     if errs:
         return tl, task_state, contract_ids, errs
@@ -216,6 +224,46 @@ def apply_patch(
         return tl, task_state, contract_ids, errs
 
     return patched_tl, patched_state, patched_contract, []
+
+
+def _check_gate_supersede_coverage(
+    tl: TaskList,
+    patch: TaskListPatch,
+    old_id: str,
+    new_id: str,
+    errors: list[ValidationError],
+) -> None:
+    """Superseding a failed gate must not shrink what the gate seals.
+
+    Without this, a failed gate could be replaced by a gate whose
+    `depends_on`/`targets` omit the dissenting validator's targets —
+    silently laundering dissent. A validator that must be retired after
+    remediation has an explicit channel: `revalidates` on the new lane.
+    """
+    by_id = {t.id: t for t in tl.tasks}
+    old = by_id.get(old_id)
+    if old is None or old.type != "gate":
+        return
+    new = by_id.get(new_id) or next(
+        (t for t in patch.add if t.id == new_id), None
+    )
+    if new is None:
+        return
+    if new.type != "gate":
+        errors.append(
+            ValidationError(
+                "gate_superseded_by_non_gate",
+                f"{old_id} -> {new_id} (type={new.type})",
+            )
+        )
+        return
+    if missing := sorted(set(old.targets) - set(new.targets)):
+        errors.append(
+            ValidationError(
+                "gate_supersede_drops_targets",
+                f"{old_id} -> {new_id} (dropped: {', '.join(missing)})",
+            )
+        )
 
 
 def _check_retirable(

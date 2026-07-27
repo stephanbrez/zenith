@@ -143,6 +143,59 @@ def check_skill_names(
     return errors
 
 
+def check_revalidates(tl: TaskList) -> list[ValidationError]:
+    """`revalidates` declares verdict supersession; keep it honest.
+
+    - only validate tasks may revalidate;
+    - every referenced id must be a declared validate task, not itself;
+    - the revalidating lane must share at least one target with each lane
+      it supersedes, otherwise the declaration cannot affect any gate.
+    """
+    errors: list[ValidationError] = []
+    by_id = {t.id: t for t in tl.tasks}
+    for task in tl.tasks:
+        if not task.revalidates:
+            continue
+        if task.type != "validate":
+            errors.append(
+                ValidationError(
+                    "revalidates_on_non_validate",
+                    f"{task.id} (type={task.type})",
+                )
+            )
+            continue
+        for old_id in task.revalidates:
+            if old_id == task.id:
+                errors.append(
+                    ValidationError("revalidates_self", task.id)
+                )
+                continue
+            old = by_id.get(old_id)
+            if old is None:
+                errors.append(
+                    ValidationError(
+                        "revalidates_unknown_task", f"{task.id} -> {old_id}"
+                    )
+                )
+                continue
+            if old.type != "validate":
+                errors.append(
+                    ValidationError(
+                        "revalidates_non_validate_task",
+                        f"{task.id} -> {old_id} (type={old.type})",
+                    )
+                )
+                continue
+            if not set(task.targets).intersection(old.targets):
+                errors.append(
+                    ValidationError(
+                        "revalidates_without_shared_target",
+                        f"{task.id} -> {old_id}",
+                    )
+                )
+    return errors
+
+
 def check_deps_resolve(tl: TaskList) -> list[ValidationError]:
     """All `depends_on` ids reference declared tasks; no self-loop."""
     errors: list[ValidationError] = []
@@ -267,6 +320,9 @@ def validate_task_list_submission(
     errs = check_deps_resolve(tl)
     if errs:
         return errs
+    errs = check_revalidates(tl)
+    if errs:
+        return errs
     errs = check_acyclic(tl)
     if errs:
         return errs
@@ -332,6 +388,7 @@ __all__ = [
     "check_task_ids",
     "check_task_shape",
     "check_skill_names",
+    "check_revalidates",
     "check_deps_resolve",
     "check_acyclic",
     "check_coverage",

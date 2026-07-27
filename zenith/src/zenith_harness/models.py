@@ -85,6 +85,18 @@ class Task(BaseModel):
             "`type == 'gate'`, not from the dep itself."
         ),
     )
+    revalidates: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Validate tasks only. Ids of earlier validate tasks whose verdicts "
+            "this lane supersedes for the targets both cover. Use when "
+            "re-validating an artifact after remediation: gates then score the "
+            "shared targets from this lane's verdicts instead of AND-ing in the "
+            "stale dissent. The superseded verdict stays in the gate record, "
+            "marked superseded. Genuinely parallel lanes (different angles on "
+            "one target) must NOT revalidate each other."
+        ),
+    )
 
 
 class TaskList(BaseModel):
