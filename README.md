@@ -112,10 +112,34 @@ First read .claude/orchestrator_prompt.md and treat it as your primary role, the
 
 Zenith logs at `WARNING` by default. To trace how workers are launched, set
 `ZENITH_LOG_LEVEL=INFO` before starting the orchestrator: each ACP dispatch
-then logs the augmented spawn command and the resolved `CODEX_CONFIG` to
-stderr (credential-looking values are masked). This is the fastest way to
-confirm that per-role reasoning effort and `-c` overrides actually reach the
+then logs the augmented spawn command and the resolved `CODEX_CONFIG`
+(credential-looking values are masked). This is the fastest way to confirm
+that per-role reasoning effort and `-c` overrides actually reach the
 codex-acp adapter.
+
+**Log to a file with `ZENITH_LOG_FILE`.** Stderr alone is not enough: Zenith
+runs as an MCP server under the host agent, so the host owns its stderr.
+Claude Code writes MCP stderr into its session `.jsonl` transcripts but drops
+Zenith's output — those lines never reach anywhere you can read them. Setting
+`ZENITH_LOG_FILE` to a path is the only way to get a complete Zenith log:
+
+```bash
+export ZENITH_LOG_FILE=~/.zenith/logs/zenith.log
+tail -f ~/.zenith/logs/zenith.log
+```
+
+Parent directories are created automatically, the file is appended to across
+runs, and setting it defaults the level to `INFO` (an explicit
+`ZENITH_LOG_LEVEL` still wins). Worker and terminal-reviewer subprocesses
+inherit the variable and append to the same file, so every line carries a
+`[mode:pid]` tag and one `tail -f` shows the whole mission:
+
+```text
+2026-07-27 12:00:01,004 [orchestrator:4811] zenith_harness.acp_runner INFO ACP spawn for node t1 ...
+2026-07-27 12:00:05,318 [worker:4899] zenith_harness.acp_runner INFO ...
+```
+
+If the path cannot be opened, Zenith warns and keeps running on stderr only.
 
 ## How Zenith Works
 

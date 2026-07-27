@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import logging
 import os
+import pathlib
 import sys
 from typing import Annotated, Any
 
@@ -412,6 +413,70 @@ def _to_payload(env_or_err) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Logging setup
+# ---------------------------------------------------------------------------
+
+
+def _configure_logging(mode: str) -> None:
+    """Configure root logging for one harness process.
+
+    Level comes from ``ZENITH_LOG_LEVEL``; when that is unset but
+    ``ZENITH_LOG_FILE`` is set, the level defaults to ``INFO`` (asking for a
+    log file implies wanting content in it). Otherwise the default stays
+    ``WARNING`` so normal operation is quiet.
+
+    Logs always go to stderr. When ``ZENITH_LOG_FILE`` holds a path, a
+    ``FileHandler`` is added as well. This matters because Zenith runs as an
+    MCP server under a host agent that owns stderr — Claude Code drops the
+    harness's stderr rather than surfacing it — so the file is the only
+    durable Zenith log.
+
+    Worker and terminal-reviewer subprocesses inherit ``ZENITH_LOG_FILE`` and
+    append to the same path, so every record is tagged ``[mode:pid]`` to keep
+    the shared file readable as one mission timeline.
+
+    Parameters
+    ----------
+    mode
+        Harness mode of this process: ``orchestrator``, ``worker``, or
+        ``terminal-reviewer``. Used only as a log-line tag.
+    """
+    log_file = os.environ.get("ZENITH_LOG_FILE", "").strip()
+    default_level = "INFO" if log_file else "WARNING"
+    log_level = os.environ.get("ZENITH_LOG_LEVEL", default_level).upper()
+    fmt = f"%(asctime)s [{mode}:%(process)d] %(name)s %(levelname)s %(message)s"
+    formatter = logging.Formatter(fmt)
+
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
+    file_error: OSError | None = None
+    if log_file:
+        # ─── Resolve the path and make sure its directory exists ───
+        path = pathlib.Path(
+            os.path.expandvars(os.path.expanduser(log_file))
+        ).resolve()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # Append mode: several harness processes share one file.
+            handlers.append(logging.FileHandler(path, mode="a", encoding="utf-8"))
+        except OSError as exc:  # ⚠️ never take the server down over a log path
+            file_error = exc
+
+    for handler in handlers:
+        handler.setFormatter(formatter)
+    logging.basicConfig(
+        level=getattr(logging, log_level, logging.WARNING),
+        handlers=handlers,
+        force=True,
+    )
+    if file_error is not None:
+        logger.warning(
+            "⚠️ ZENITH_LOG_FILE=%r unusable (%s); logging to stderr only",
+            log_file,
+            file_error,
+        )
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -432,17 +497,10 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=0)  # 0 → ephemeral
     args = parser.parse_args()
 
-    # Opt-in audit logging via ZENITH_LOG_LEVEL (e.g. INFO). Default
-    # WARNING keeps normal operation quiet. Logs go to stderr, which
-    # the MCP stdio transport keeps separate from the JSON-RPC stdout
-    # channel. Useful for tracing ACP spawn config (acp_runner emits
-    # the augmented command + CODEX_CONFIG per dispatch).
-    log_level = os.environ.get("ZENITH_LOG_LEVEL", "WARNING").upper()
-    logging.basicConfig(
-        level=getattr(logging, log_level, logging.WARNING),
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
-        stream=sys.stderr,
-    )
+    # Opt-in audit logging via ZENITH_LOG_LEVEL (e.g. INFO) and
+    # ZENITH_LOG_FILE (a path). Useful for tracing ACP spawn config
+    # (acp_runner emits the augmented command + CODEX_CONFIG per dispatch).
+    _configure_logging(args.mode)
 
     if args.mode == "orchestrator":
         config = HarnessConfig.discover()

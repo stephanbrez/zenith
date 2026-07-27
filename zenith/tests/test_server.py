@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -21,6 +24,7 @@ from zenith_harness.models import (
     WorkHandoff,
 )
 from zenith_harness.server import (
+    _configure_logging,
     create_orchestrator_server,
     create_terminal_reviewer_server,
     create_worker_server,
@@ -308,3 +312,115 @@ def test_run_coro_blocking_works_inside_running_loop() -> None:
         return _run_coro_blocking(_inner())
 
     assert asyncio.run(_outer()) == 42
+
+
+# ===== _configure_logging =====
+
+
+@pytest.fixture
+def clean_root_logger() -> Iterator[None]:
+    """Save/restore root-logger state so logging tests do not leak globally."""
+    root = logging.getLogger()
+    saved_handlers = root.handlers[:]
+    saved_level = root.level
+    yield
+    for handler in root.handlers[:]:
+        if handler not in saved_handlers:
+            handler.close()
+    root.handlers[:] = saved_handlers
+    root.setLevel(saved_level)
+
+
+def _file_handlers() -> list[logging.FileHandler]:
+    return [
+        h for h in logging.getLogger().handlers if isinstance(h, logging.FileHandler)
+    ]
+
+
+def test_configure_logging_writes_tagged_lines_to_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    clean_root_logger: None,
+) -> None:
+    """ZENITH_LOG_FILE creates missing parents and receives tagged records."""
+    log_path = tmp_path / "nested" / "dir" / "zenith.log"
+    monkeypatch.setenv("ZENITH_LOG_FILE", str(log_path))
+    monkeypatch.delenv("ZENITH_LOG_LEVEL", raising=False)
+
+    _configure_logging("orchestrator")
+    logging.getLogger("zenith_harness.test").info("spawn probe")
+    for handler in _file_handlers():
+        handler.flush()
+
+    text = log_path.read_text()
+    assert "spawn probe" in text
+    assert f"[orchestrator:{os.getpid()}]" in text
+
+
+def test_configure_logging_file_implies_info(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    clean_root_logger: None,
+) -> None:
+    """A log file with no explicit level defaults to INFO, not WARNING."""
+    monkeypatch.setenv("ZENITH_LOG_FILE", str(tmp_path / "zenith.log"))
+    monkeypatch.delenv("ZENITH_LOG_LEVEL", raising=False)
+
+    _configure_logging("worker")
+
+    assert logging.getLogger().level == logging.INFO
+
+
+def test_configure_logging_explicit_level_wins(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    clean_root_logger: None,
+) -> None:
+    """ZENITH_LOG_LEVEL beats the file-implied INFO default, so INFO records
+    are filtered out of the file.
+    """
+    log_path = tmp_path / "zenith.log"
+    monkeypatch.setenv("ZENITH_LOG_FILE", str(log_path))
+    monkeypatch.setenv("ZENITH_LOG_LEVEL", "WARNING")
+
+    _configure_logging("orchestrator")
+    logging.getLogger("zenith_harness.test").info("should not appear")
+    logging.getLogger("zenith_harness.test").warning("should appear")
+    for handler in _file_handlers():
+        handler.flush()
+
+    text = log_path.read_text()
+    assert "should not appear" not in text
+    assert "should appear" in text
+
+
+def test_configure_logging_without_file_stays_stderr_only(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_root_logger: None,
+) -> None:
+    """Unset ZENITH_LOG_FILE keeps the previous stderr-only WARNING default."""
+    monkeypatch.delenv("ZENITH_LOG_FILE", raising=False)
+    monkeypatch.delenv("ZENITH_LOG_LEVEL", raising=False)
+
+    _configure_logging("orchestrator")
+
+    assert not _file_handlers()
+    assert logging.getLogger().level == logging.WARNING
+
+
+def test_configure_logging_unusable_path_does_not_raise(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    clean_root_logger: None,
+) -> None:
+    """A bad log path degrades to stderr instead of killing the server."""
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("regular file")
+    monkeypatch.setenv("ZENITH_LOG_FILE", str(blocker / "zenith.log"))
+
+    _configure_logging("orchestrator")
+
+    assert not _file_handlers()
+    assert any(
+        isinstance(h, logging.StreamHandler) for h in logging.getLogger().handlers
+    )
