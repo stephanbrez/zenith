@@ -62,4 +62,5 @@ change or depends on unmerged work).
 
 Background for the 2026-07-27 changes (`ea38d25`..`32907a2`): findings from a
 real end-to-end mission, analyzed and verified against source in
-`zenith-harness-findings.md` (repo root, untracked).
+[`zenith-harness-findings.md`](zenith-harness-findings.md) (repo root;
+fork-only documentation, not part of any upstream PR).
