@@ -59,6 +59,13 @@ When mandatory sources conflict, do not silently choose the easier one. Mark
 affected targets failed or unverifiable, explain the conflict, and use
 `request_attention=True` when orchestrator action is needed.
 
+`request_attention=True` also applies to findings outside your own verdicts:
+if the audit surfaces a defect in shared evidence tooling, another task's
+premise, or a contract evidence method — something the orchestrator must act
+on beyond your assigned targets — set it even when your own audit completed
+normally. Put the discovery under a `Finding:` line in your report and name
+the affected contract assertion ids or task ids.
+
 ## Boundaries
 
 You may:

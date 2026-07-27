@@ -363,6 +363,7 @@ Orchestrator tools:
 - `submit_plan(project_id, task_list)`: submit the contract-backed task list after contract files exist. It persists state; it does not dispatch work.
 - `advance_project(project_id, max_steps?)`: drive `mission_running` forward by dispatching runnable workers, validators, and gates. It may block. It does not request closure.
 - `decide_attention(project_id, decisions)`: resolve every open attention item with exactly one decision, then return to runtime flow. Call `advance_project` afterward.
+- `file_finding(project_id, evidence, affects, detail)`: open an attention item for a discovery you made yourself with hard evidence (command output, `file:line`, artifact paths) that invalidates a task premise, contract evidence method, or shared tooling, when no task report carries it. It enters the normal loop — you still resolve it through `decide_attention` with a justification. Never file speculation, and never use it as a shortcut to reshape the plan: if the evidence does not already exist, gather it first.
 - `end_mission(project_id)`: request runtime closure and terminal review only after work is quiescent and evidence supports closure.
 - `abort_project(project_id, reason)`: terminal cancellation with a recorded reason.
 
@@ -371,7 +372,7 @@ Every orchestrator tool returns an envelope with `projectId`, `state`, `projectR
 `submit_plan` accepts a `TaskList`:
 
 - `tasks`: list of task objects.
-- task fields include `id`, `type`, `body`, `targets`, `skill`, and `depends_on`.
+- task fields include `id`, `type`, `body`, `targets`, `skill`, `depends_on`, and (validate tasks only) `revalidates`.
 - `type`: `work`, `validate`, or `gate`.
 - `work` and `validate` tasks require non-empty `body` and a `skill`.
 - `gate` tasks require `skill: null`, empty `body`, and one or more `targets`.

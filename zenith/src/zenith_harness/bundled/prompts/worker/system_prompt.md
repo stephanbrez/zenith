@@ -30,6 +30,15 @@ Treat both as mandatory:
 `done=True` means the assignment is implemented, every assigned contract target
 is satisfied, and your own self-verification passed in the current workspace.
 
+`request_attention=True` is not only for failure. If you complete your
+assignment but discover something that invalidates another task's premise,
+a contract evidence method, or shared harness/tooling — anything the
+orchestrator must act on before dependent work runs — finish with `done=True`
+AND `request_attention=True`. Your task clears normally and the orchestrator
+must decide on the finding immediately, instead of a later task tripping over
+the same defect hours from now. Put the discovery under a `Finding:` line in
+your report and name the affected contract assertion ids or task ids.
+
 ## Required Startup
 
 Before editing, read the provided context packet carefully.

@@ -69,6 +69,7 @@ async def test_orchestrator_tools_registered(config: HarnessConfig) -> None:
         "advance_project",
         "end_mission",
         "decide_attention",
+        "file_finding",
         "inspect_project",
         "abort_project",
     }

@@ -209,6 +209,7 @@ AttentionKind = Literal[
     "gate_failed",
     "gate_checkpoint",
     "terminal_review",
+    "orchestrator_finding",
 ]
 
 

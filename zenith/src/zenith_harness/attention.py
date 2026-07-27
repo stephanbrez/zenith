@@ -215,6 +215,34 @@ def gate_checkpoint(
     )
 
 
+def orchestrator_finding(
+    mission_id: str,
+    *,
+    evidence: str,
+    affects: list[str],
+    detail: str,
+) -> AttentionItemInternal:
+    """Orchestrator-originated discovery, entering the normal attention loop.
+
+    Not a bypass: the item is resolved only through decide_attention with a
+    recorded justification, exactly like runtime-raised items.
+    """
+    lines = [
+        "Orchestrator finding",
+        f"affects: {', '.join(affects) if affects else '(unspecified)'}",
+        f"detail: {detail}",
+        "",
+        "evidence:",
+        evidence,
+    ]
+    return AttentionItemInternal(
+        id=_new_id("finding"),
+        kind="orchestrator_finding",
+        mission_id=mission_id,
+        report="\n".join(lines),
+    )
+
+
 def terminal_review(
     mission_id: str,
     review: TerminalReviewHandoff,

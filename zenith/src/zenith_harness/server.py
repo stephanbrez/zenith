@@ -394,6 +394,60 @@ def _register_orchestrator_tools(mcp: FastMCP, controller: ProjectController) ->
                 return _to_payload(exc)
 
     @mcp.tool(
+        name="file_finding",
+        description=(
+            "Open an attention item for a discovery YOU made with hard evidence "
+            "(command output, file:line, artifact path) that invalidates a task's "
+            "premise, contract evidence method, or shared tooling — when no task "
+            "report carries it. State must be mission_running; state becomes "
+            "attention_needed and the finding is resolved like any other item "
+            "through decide_attention with a justification. Not a plan-amendment "
+            "shortcut: file only what evidence already shows, never speculation."
+        ),
+    )
+    async def file_finding(
+        project_id: Annotated[str, Field(description="Project id.")],
+        evidence: Annotated[
+            str,
+            Field(
+                description=(
+                    "Concrete evidence: command output, file:line citations, or "
+                    "artifact paths. Must not be empty or speculative."
+                )
+            ),
+        ],
+        detail: Annotated[
+            str,
+            Field(description="What the evidence shows and why it matters."),
+        ],
+        affects: Annotated[
+            list[str] | None,
+            Field(
+                default=None,
+                description=(
+                    "Contract assertion ids and/or task ids the finding affects."
+                ),
+            ),
+        ] = None,
+    ) -> dict[str, Any]:
+        async with await _project_lock(project_id):
+            try:
+                return _to_payload(
+                    await asyncio.to_thread(
+                        _run_project_locked,
+                        controller,
+                        project_id,
+                        controller.file_finding,
+                        project_id,
+                        evidence,
+                        affects or [],
+                        detail,
+                    )
+                )
+            except ToolError as exc:
+                return _to_payload(exc)
+
+    @mcp.tool(
         name="inspect_project",
         description=(
             "Pure read of current state, full task-list view, and open attention. "
@@ -463,7 +517,14 @@ def _register_worker_tools(mcp: FastMCP) -> None:
             bool,
             Field(
                 default=False,
-                description="Set True to return this completed task's raw report to the orchestrator before the task list continues.",
+                description=(
+                    "Set True whenever the orchestrator must decide on this "
+                    "report before the task list continues — including when "
+                    "done=True but you discovered something that invalidates "
+                    "another task's premise, contract evidence, or shared "
+                    "tooling. The task still clears; an attention item opens. "
+                    "Name affected assertion/task ids under a `Finding:` line."
+                ),
             ),
         ] = False,
         items: Annotated[

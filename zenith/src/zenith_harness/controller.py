@@ -14,11 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from . import attention as attn_factory
 from .assets import AssetLoader
 from .config import HarnessConfig
 from .coordinator import MissionCoordinator
 from .dispatcher import NodeDispatcher, TerminalReviewer
-from .envelope import EnvelopeDagMode, make_envelope
+from .envelope import EnvelopeDagMode, make_envelope, public_attention_items
 from .models import (
     AttentionItemInternal,
     AttentionNeeded,
@@ -198,6 +199,53 @@ class ProjectController:
         self.store.append_decision_record(project_id, decisions, open_items)
         self.store.clear_attention(project_id)
         self.store.save_state(project_id, next_state)
+        return self._build_envelope(project_id, dag_mode="none")
+
+    def file_finding(
+        self,
+        project_id: str,
+        evidence: str,
+        affects: list[str],
+        detail: str,
+    ) -> Envelope:
+        """Open an attention item for an orchestrator-originated discovery.
+
+        This is the only channel for evidence the orchestrator holds itself
+        (as opposed to a task report). It does NOT bypass the decision loop:
+        the item lands in the same attention queue and can only be resolved
+        through decide_attention with a recorded justification — plan patches
+        stay anchored to an attention item.
+        """
+        state = self._require_state(project_id)
+        if not isinstance(state, MissionRunning):
+            raise ToolError(
+                "wrong_state",
+                f"file_finding requires MissionRunning; got {state.state}",
+            )
+        if not evidence.strip():
+            raise ToolError(
+                "missing_evidence",
+                "file_finding requires concrete evidence (command output, "
+                "file:line, artifact path) — gather it before filing",
+            )
+        if not detail.strip():
+            raise ToolError(
+                "missing_detail",
+                "file_finding requires a statement of what the evidence shows",
+            )
+        item = attn_factory.orchestrator_finding(
+            state.mission_id,
+            evidence=evidence,
+            affects=affects,
+            detail=detail,
+        )
+        existing = self.store.load_attention(project_id)
+        existing.append(item)
+        self.store.save_attention(project_id, existing)
+        self.store.save_state(
+            project_id,
+            AttentionNeeded(items=public_attention_items(existing)),
+        )
         return self._build_envelope(project_id, dag_mode="none")
 
     def inspect_project(self, project_id: str) -> Envelope:
