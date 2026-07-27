@@ -148,7 +148,9 @@ state transition (task dispatched/cleared/failed, gate evaluated, attention
 opened) plus a heartbeat every 30 seconds (override with
 `ZENITH_PROGRESS_HEARTBEAT_SECONDS`). This keeps well-behaved clients from
 aborting the call on idle timeout and lets the orchestrator distinguish a
-slow worker from a wedged one.
+slow worker from a wedged one. The same transition events are also written
+at `INFO` through standard logging, so a `ZENITH_LOG_FILE` capture contains
+the full wave timeline whether or not any MCP client was listening.
 
 If your client still aborts long tool calls, two mitigations exist (they are
 fallbacks, not the fix): a per-server `"timeout"` in `.mcp.json` (read at

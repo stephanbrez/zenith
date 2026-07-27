@@ -7,6 +7,7 @@ tool loops `step()` until a returnable condition.
 from __future__ import annotations
 
 import concurrent.futures
+import logging
 from dataclasses import dataclass, field
 from typing import Callable, Literal
 
@@ -35,6 +36,9 @@ from .models import (
 )
 from .storage import ProjectStore, utc_now_filesafe
 from .envelope import public_attention_items
+
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -88,8 +92,10 @@ class MissionCoordinator:
         self.on_event = on_event
 
     def _emit(self, message: str) -> None:
-        """Report a state transition to the observer, never letting a
-        broken/detached observer break the wave itself."""
+        """Record a state transition: always to the log (ZENITH_LOG_FILE
+        captures INFO), and to the MCP observer when one is attached. A
+        broken/detached observer never breaks the wave itself."""
+        logger.info("[%s] %s", self.project_id, message)
         if self.on_event is None:
             return
         try:

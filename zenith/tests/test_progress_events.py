@@ -182,6 +182,24 @@ class TestCoordinatorEmitsEvents:
         env = controller.advance_project(pid)
         assert env.state.state == "attention_needed"
 
+    def test_transitions_reach_the_log_without_an_observer(
+        self,
+        config: HarnessConfig,
+        workspace: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The durable log (ZENITH_LOG_FILE) must record the wave timeline
+        even when no MCP client is listening."""
+        controller = _controller(config)
+        pid = _seed_project(controller, workspace)
+        controller.submit_plan(pid, _tl_with_gate())
+        with caplog.at_level("INFO", logger="zenith_harness.coordinator"):
+            controller.advance_project(pid)
+        logged = [r.getMessage() for r in caplog.records]
+        assert any("task w1 (work) dispatched" in m for m in logged)
+        assert any("gate g1 cleared" in m for m in logged)
+        assert all(f"[{pid}]" in m for m in logged if "dispatched" in m)
+
 
 class _FakeContext:
     def __init__(self) -> None:
