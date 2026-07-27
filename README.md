@@ -141,6 +141,24 @@ inherit the variable and append to the same file, so every line carries a
 
 If the path cannot be opened, Zenith warns and keeps running on stderr only.
 
+**Long waves and client idle timeouts.** `advance_project` and `end_mission`
+block for the whole wave — a single worker task can legitimately run for an
+hour. Zenith streams MCP progress notifications while a wave runs: every
+state transition (task dispatched/cleared/failed, gate evaluated, attention
+opened) plus a heartbeat every 30 seconds (override with
+`ZENITH_PROGRESS_HEARTBEAT_SECONDS`). This keeps well-behaved clients from
+aborting the call on idle timeout and lets the orchestrator distinguish a
+slow worker from a wedged one.
+
+If your client still aborts long tool calls, two mitigations exist (they are
+fallbacks, not the fix): a per-server `"timeout"` in `.mcp.json` (read at
+session start — it cannot rescue a session already in progress), and
+`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT=0` to disable the idle timeout globally
+in Claude Code. Note that even when a client aborts the call, the wave
+itself survives: workers are subprocesses of the Zenith server and their
+handoffs are still written; a concurrent retry is rejected with
+`wave_in_progress` instead of racing the running wave.
+
 ## How Zenith Works
 
 <p align="center">

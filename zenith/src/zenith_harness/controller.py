@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from .assets import AssetLoader
 from .config import HarnessConfig
@@ -126,10 +127,15 @@ class ProjectController:
         self,
         project_id: str,
         max_steps: int | None = None,
+        on_event: Callable[[str], None] | None = None,
     ) -> Envelope:
         self.store.sync_workspace_skill_surfaces(project_id)
         coordinator = MissionCoordinator(
-            self.store, project_id, self.dispatcher, self.terminal_reviewer
+            self.store,
+            project_id,
+            self.dispatcher,
+            self.terminal_reviewer,
+            on_event=on_event,
         )
         steps = 0
         while True:
@@ -142,7 +148,11 @@ class ProjectController:
         self.store.sync_workspace_skill_surfaces(project_id)
         return self._build_envelope(project_id, dag_mode="frontier")
 
-    def end_mission(self, project_id: str) -> Envelope:
+    def end_mission(
+        self,
+        project_id: str,
+        on_event: Callable[[str], None] | None = None,
+    ) -> Envelope:
         state = self._require_state(project_id)
         if not isinstance(state, MissionRunning):
             raise ToolError(
@@ -150,7 +160,11 @@ class ProjectController:
                 f"end_mission requires MissionRunning; got {state.state}",
             )
         coordinator = MissionCoordinator(
-            self.store, project_id, self.dispatcher, self.terminal_reviewer
+            self.store,
+            project_id,
+            self.dispatcher,
+            self.terminal_reviewer,
+            on_event=on_event,
         )
         result = coordinator.close_mission(state.mission_id)
         if result.kind == "idle":

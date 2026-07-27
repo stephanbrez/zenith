@@ -145,6 +145,78 @@ def _run_project_locked(
         return fn(*args)
 
 
+# Seconds between progress heartbeats while a blocking wave runs. Clients
+# abort MCP tools that stay silent (Claude Code defaults to 1800s), so the
+# heartbeat must be far below any plausible idle timeout.
+PROGRESS_HEARTBEAT_SECONDS: float = float(
+    os.environ.get("ZENITH_PROGRESS_HEARTBEAT_SECONDS", "30")
+)
+
+
+async def _notify(ctx: Context, message: str, elapsed_s: float) -> None:
+    """Best-effort progress + log notification; never fails the wave."""
+    try:
+        await ctx.report_progress(progress=round(elapsed_s))
+        await ctx.info(message)
+    except Exception:  # noqa: BLE001
+        logger.debug("progress notification failed", exc_info=True)
+
+
+async def _run_with_progress(
+    ctx: Context | None,
+    fn: Callable[..., Any],
+    *args: Any,
+) -> Any:
+    """Run a blocking controller call on a worker thread while streaming
+    coordinator events and a periodic heartbeat to the MCP client.
+
+    The wrapped `fn` receives an extra trailing `on_event` callable that is
+    safe to invoke from the worker thread. Without notifications, a long
+    wave is totally silent and MCP clients abort the call on idle timeout
+    even though the wave itself is healthy (workers are subprocesses and
+    keep running). Events reset the client's idle timer and let the
+    orchestrator distinguish a slow worker from a wedged one.
+    """
+    if ctx is None:
+        return await asyncio.to_thread(fn, *args, None)
+
+    loop = asyncio.get_running_loop()
+    events: asyncio.Queue[str] = asyncio.Queue()
+
+    def on_event(message: str) -> None:
+        # Called from the worker thread; hop onto the loop. If the loop is
+        # gone (server shutdown), the coordinator's emit guard swallows it.
+        loop.call_soon_threadsafe(events.put_nowait, message)
+
+    wave = asyncio.ensure_future(asyncio.to_thread(fn, *args, on_event))
+    started = loop.time()
+    getter: asyncio.Task[str] = asyncio.ensure_future(events.get())
+    try:
+        while True:
+            done, _ = await asyncio.wait(
+                {wave, getter},
+                timeout=PROGRESS_HEARTBEAT_SECONDS,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            elapsed = loop.time() - started
+            if getter in done:
+                await _notify(ctx, getter.result(), elapsed)
+                getter = asyncio.ensure_future(events.get())
+                continue
+            if wave in done:
+                break
+            await _notify(
+                ctx,
+                f"wave in progress ({round(elapsed)}s elapsed)",
+                elapsed,
+            )
+    finally:
+        getter.cancel()
+    while not events.empty():
+        await _notify(ctx, events.get_nowait(), loop.time() - started)
+    return await wave
+
+
 def _register_orchestrator_tools(mcp: FastMCP, controller: ProjectController) -> None:
     # Per-project lock around mutating controller calls. The thread hop in each
     # tool prevents event-loop blocking, but two same-project tool calls could
@@ -246,7 +318,8 @@ def _register_orchestrator_tools(mcp: FastMCP, controller: ProjectController) ->
         async with await _project_lock(project_id):
             try:
                 return _to_payload(
-                    await asyncio.to_thread(
+                    await _run_with_progress(
+                        ctx,
                         _run_project_locked,
                         controller,
                         project_id,
@@ -271,11 +344,13 @@ def _register_orchestrator_tools(mcp: FastMCP, controller: ProjectController) ->
     )
     async def end_mission(
         project_id: Annotated[str, Field(description="Project id.")],
+        ctx: Context | None = None,
     ) -> dict[str, Any]:
         async with await _project_lock(project_id):
             try:
                 return _to_payload(
-                    await asyncio.to_thread(
+                    await _run_with_progress(
+                        ctx,
                         _run_project_locked,
                         controller,
                         project_id,

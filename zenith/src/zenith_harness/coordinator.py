@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import concurrent.futures
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Callable, Literal
 
 from . import attention as attn_factory
 from .dispatcher import (
@@ -79,11 +79,23 @@ class MissionCoordinator:
         project_id: str,
         dispatcher: NodeDispatcher,
         terminal_reviewer: TerminalReviewer,
+        on_event: Callable[[str], None] | None = None,
     ):
         self.store = store
         self.project_id = project_id
         self.dispatcher = dispatcher
         self.terminal_reviewer = terminal_reviewer
+        self.on_event = on_event
+
+    def _emit(self, message: str) -> None:
+        """Report a state transition to the observer, never letting a
+        broken/detached observer break the wave itself."""
+        if self.on_event is None:
+            return
+        try:
+            self.on_event(message)
+        except Exception:  # noqa: BLE001
+            pass
 
     # ------------------------------------------------------------------
     # The main step() kernel
@@ -152,6 +164,7 @@ class MissionCoordinator:
         task_state.set_status(task.id, "running")
         task_state.set_last_attempt(task.id, spawn_ts)
         self.store.save_task_state(self.project_id, mid, task_state)
+        self._emit(f"task {task.id} ({task.type}) dispatched")
 
         request = DispatchRequest(
             project_id=self.project_id,
@@ -271,6 +284,13 @@ class MissionCoordinator:
                 _BatchAttempt(task=task, spawn_ts=spawn_ts)
             )
         self.store.save_task_state(self.project_id, mid, task_state)
+        self._emit(
+            "batch dispatched: "
+            + ", ".join(
+                f"{attempt.task.id} ({attempt.task.type})"
+                for attempt in batch_attempts
+            )
+        )
 
         requests = [
             DispatchRequest(
@@ -382,13 +402,20 @@ class MissionCoordinator:
                 task_state.set_status(task.id, "failed")
                 self.store.save_task_state(self.project_id, mid, task_state)
                 assert isinstance(handoff, WorkHandoff)
+                self._emit(f"task {task.id} failed")
                 return [attn_factory.node_failed(mid, task, handoff)]
             task_state.set_status(task.id, "cleared")
             self.store.save_task_state(self.project_id, mid, task_state)
+            self._emit(f"task {task.id} cleared")
         elif task.type == "validate":
             task_state.set_status(task.id, "cleared")
             self.store.save_task_state(self.project_id, mid, task_state)
             if isinstance(handoff, ValidateHandoff):
+                passed_count = sum(1 for item in handoff.items if item.passed)
+                self._emit(
+                    f"validator {task.id} finished: "
+                    f"{passed_count}/{len(handoff.items)} items passed"
+                )
                 for item in handoff.items:
                     entry = contract_state.items.setdefault(
                         item.item_id, ContractStateEntry()
@@ -684,6 +711,7 @@ class MissionCoordinator:
         if event.result.cleared:
             task_state.set_status(event.gate.id, "cleared")
             self.store.save_task_state(self.project_id, mid, task_state)
+            self._emit(f"gate {event.gate.id} cleared")
             self._raise_attention(
                 [
                     attn_factory.gate_checkpoint(
@@ -697,6 +725,9 @@ class MissionCoordinator:
         else:
             task_state.set_status(event.gate.id, "failed")
             self.store.save_task_state(self.project_id, mid, task_state)
+            self._emit(
+                f"gate {event.gate.id} failed: {event.result.reason or ''}"
+            )
             self._raise_attention(
                 [
                     attn_factory.gate_failed(
@@ -717,6 +748,7 @@ class MissionCoordinator:
 
     def _enter_terminal_review(self, mid: str) -> StepResult:
         spawn_ts = utc_now_filesafe()
+        self._emit("terminal review dispatched")
         try:
             report = self.terminal_reviewer.review(self.project_id, mid, spawn_ts)
         except Exception as exc:  # noqa: BLE001
@@ -743,6 +775,13 @@ class MissionCoordinator:
     # ------------------------------------------------------------------
 
     def _raise_attention(self, items: list[AttentionItemInternal]) -> None:
+        self._emit(
+            "attention opened: "
+            + ", ".join(
+                f"{item.kind} ({item.node_id})" if item.node_id else item.kind
+                for item in items
+            )
+        )
         existing = self.store.load_attention(self.project_id)
         existing.extend(items)
         self.store.save_attention(self.project_id, existing)
