@@ -141,6 +141,49 @@ class TestInit:
         assert server_env["ZENITH_VALIDATOR_REASONING_EFFORT"] == "medium"
         assert server_env["ZENITH_TERMINAL_REVIEWER_REASONING_EFFORT"] == "low"
 
+    def test_codex_init_escapes_quoted_acp_commands(
+        self, runner: CliRunner, workspace: Path, env: dict[str, str]
+    ) -> None:
+        """Quoted ACP commands must survive into config.toml as valid TOML.
+
+        `-c key="value"` is the supported splice shape for codex config, so
+        every role's command can carry double quotes. Interpolating them raw
+        terminates the TOML string early and corrupts the managed block.
+        The three commands differ so `ProviderSelection.env()` emits all
+        three vars — it suppresses a role whose resolved command matches the
+        previous role's.
+        """
+        worker_cmd = 'codex-acp -c model="gpt-5.6-luna"'
+        validator_cmd = 'codex-acp -c model="gpt-5.6-terra"'
+        reviewer_cmd = 'codex-acp -c model="gpt-5.6-sol"'
+
+        r = runner.invoke(
+            cli,
+            [
+                "init",
+                "--workspace-dir",
+                str(workspace),
+                "--agent",
+                "codex",
+                "--worker-acp-command",
+                worker_cmd,
+                "--validator-acp-command",
+                validator_cmd,
+                "--terminal-reviewer-acp-command",
+                reviewer_cmd,
+            ],
+        )
+        assert r.exit_code == 0, r.output
+
+        # Parsing at all is the regression guard — this raises before the fix.
+        config = tomllib.loads(
+            (workspace / ".codex" / "config.toml").read_text(encoding="utf-8")
+        )
+        server_env = config["mcp_servers"]["zenith"]["env"]
+        assert server_env["ZENITH_WORKER_ACP_COMMAND"] == worker_cmd
+        assert server_env["ZENITH_VALIDATOR_ACP_COMMAND"] == validator_cmd
+        assert server_env["ZENITH_TERMINAL_REVIEWER_ACP_COMMAND"] == reviewer_cmd
+
     def test_init_reasoning_effort_flags_override_env(
         self,
         runner: CliRunner,
