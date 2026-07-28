@@ -205,3 +205,123 @@ def test_terminal_reviewer_cascades_to_validator_after_round_trip(
 
     assert config.terminal_reviewer_provider_name is None
     assert config.terminal_reviewer_provider.name == "codex"
+
+
+def test_validator_inherits_custom_worker_command_same_provider(
+    monkeypatch,
+    harness_home: Path,
+) -> None:
+    """A custom worker command cascades to a same-provider validator.
+
+    Regression: the or-chain preferred the provider default (always
+    truthy) over inheritance, so validators silently ran the stock
+    adapter while workers ran the custom command (model flags, wrapper
+    scripts, mocks).
+    """
+    selection = ProviderSelection(
+        orchestrator=get_provider("claude"),
+        worker=get_provider("claude"),
+        worker_acp_command="claude-agent-acp --model custom",
+    )
+
+    config = _apply_selection_env(monkeypatch, harness_home, selection)
+
+    assert (
+        config.resolved_validator_acp_command
+        == "claude-agent-acp --model custom"
+    )
+    assert (
+        config.resolved_terminal_reviewer_acp_command
+        == "claude-agent-acp --model custom"
+    )
+    # for_role is the dispatch-time consumer of the cascade.
+    assert (
+        config.for_role("validator").worker_acp_command
+        == "claude-agent-acp --model custom"
+    )
+    assert (
+        config.for_role("terminal_reviewer").worker_acp_command
+        == "claude-agent-acp --model custom"
+    )
+
+
+def test_validator_provider_switch_uses_provider_default(
+    monkeypatch,
+    harness_home: Path,
+) -> None:
+    """A different validator provider must NOT inherit the worker command."""
+    selection = ProviderSelection(
+        orchestrator=get_provider("claude"),
+        worker=get_provider("claude"),
+        worker_acp_command="claude-agent-acp --model custom",
+        validation_worker=get_provider("codex"),
+    )
+
+    config = _apply_selection_env(monkeypatch, harness_home, selection)
+
+    assert config.resolved_validator_acp_command == "codex-acp"
+    # Reviewer cascades from the validator (same provider as validator).
+    assert config.resolved_terminal_reviewer_acp_command == "codex-acp"
+
+
+def test_explicit_validator_command_beats_inheritance(
+    monkeypatch,
+    harness_home: Path,
+) -> None:
+    selection = ProviderSelection(
+        orchestrator=get_provider("claude"),
+        worker=get_provider("claude"),
+        worker_acp_command="claude-agent-acp --model custom",
+        validation_worker=get_provider("claude"),
+        validation_worker_acp_command="claude-agent-acp --model validator",
+    )
+
+    config = _apply_selection_env(monkeypatch, harness_home, selection)
+
+    assert (
+        config.resolved_validator_acp_command
+        == "claude-agent-acp --model validator"
+    )
+    # Reviewer inherits the validator's explicit command, not the worker's.
+    assert (
+        config.resolved_terminal_reviewer_acp_command
+        == "claude-agent-acp --model validator"
+    )
+
+
+def test_config_resolution_matches_provider_selection(
+    monkeypatch,
+    harness_home: Path,
+) -> None:
+    """config.py and providers.py implement the same cascade — the read
+    side of env() must resolve identically to the write side.
+    """
+    cases = [
+        ProviderSelection(
+            orchestrator=get_provider("claude"),
+            worker=get_provider("claude"),
+            worker_acp_command="claude-agent-acp --model custom",
+        ),
+        ProviderSelection(
+            orchestrator=get_provider("claude"),
+            worker=get_provider("claude"),
+            worker_acp_command="claude-agent-acp --model custom",
+            validation_worker=get_provider("codex"),
+        ),
+        ProviderSelection(
+            orchestrator=get_provider("claude"),
+            worker=get_provider("codex"),
+            worker_acp_command="codex-acp -c model=\"custom\"",
+            terminal_reviewer=get_provider("claude"),
+        ),
+    ]
+    for selection in cases:
+        config = _apply_selection_env(monkeypatch, harness_home, selection)
+        assert (
+            config.resolved_validator_acp_command
+            == selection.resolved_validation_worker_acp_command
+        ), selection
+        assert (
+            config.resolved_terminal_reviewer_acp_command
+            == selection.resolved_terminal_reviewer_acp_command
+        ), selection
