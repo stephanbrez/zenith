@@ -397,7 +397,11 @@ def _write_bootstrap_config(
     elif fmt == "codex_config":
         config_path = workspace / ".codex" / "config.toml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        env_lines = "\n".join(f'{k} = "{v}"' for k, v in env.items())
+        # TOML basic strings share JSON's escape syntax, so json.dumps closes
+        # and escapes embedded quotes. ACP commands splice config via
+        # `-c key="value"`, and forwarded env values may hold quotes or
+        # backslashes; interpolating either raw emits invalid TOML.
+        env_lines = "\n".join(f"{k} = {json.dumps(v)}" for k, v in env.items())
         block = (
             'model = "gpt-5.5"\n'
             'sandbox_mode = "danger-full-access"\n'
