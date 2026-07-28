@@ -71,6 +71,7 @@ change or depends on unmerged work).
 
 | Commit | Change | Upstream status |
 | --- | --- | --- |
+| `643d675` | `zenith init --log-level/--log-file` flags persist the log env vars into the generated server config | not filed; belongs with the observability commits (`6d618ca`/`6f3cc39`) if those are ever filed |
 | `6c3fbb8` | Pin the ruff rule set (`lint.select` + `required-version`) so `ruff check` stops meaning something different per ruff release | fork-only for now; `upstream/ruff-rule-pin` on fork is ready to file (PR body below), held until #26/#31 get engagement |
 | `64f24fa` | Escape env values in the codex `config.toml` writer (quoted ACP commands emitted invalid TOML) | [PR #34](https://github.com/Intelligent-Internet/zenith/pull/34), filed 2026-07-28 from `upstream/toml-env-escaping`; motivated by #31 but **no code dependency** — applies cleanly to `origin/main`. Upstream variant drops the reviewer assertion (needs #26) |
 | `c76b945` | Custom worker ACP command cascades to same-provider validator/reviewer | on hold until #26/#31 get engagement; `upstream/acp-command-cascade` on fork is ready to file (PR body below) |
