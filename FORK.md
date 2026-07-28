@@ -51,6 +51,7 @@ change or depends on unmerged work).
 
 | Commit | Change | Upstream status |
 | --- | --- | --- |
+| `64f24fa` | Escape env values in the codex `config.toml` writer (quoted ACP commands emitted invalid TOML) | [PR #34](https://github.com/Intelligent-Internet/zenith/pull/34), filed 2026-07-28 from `upstream/toml-env-escaping`; motivated by #31 but **no code dependency** — applies cleanly to `origin/main`. Upstream variant drops the reviewer assertion (needs #26) |
 | `c76b945` | Custom worker ACP command cascades to same-provider validator/reviewer | on hold until #26/#31 get engagement; `upstream/acp-command-cascade` on fork is ready to file (PR body below) |
 | `02aaf73` | Scoped `CODEX_HOME` for the codex terminal reviewer | not filed (depends on PR #31) |
 | `2fa9a62` | Terminal reviewer: `_meta` settingSources/skills isolation (claude) | [PR #33](https://github.com/Intelligent-Internet/zenith/pull/33), filed 2026-07-27 |
