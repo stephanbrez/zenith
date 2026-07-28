@@ -116,9 +116,13 @@ with the body below; delete the section once filed.
 
 ### `6c3fbb8` — ruff rule-set pin (branch `upstream/ruff-rule-pin`)
 
-Hold until PR #26 or #31 gets maintainer engagement. This one is a shared-config
-change that buys upstream more than it buys this fork — the fork controls its own
-lock refreshes — so it is the least urgent of the held set. Title:
+Branch is cut from `origin/main` @ `a21c071` (not `feb1d62` like the older held
+branches) and carries only the `pyproject.toml` change; numbers below are
+measured on that base — 56 findings, not the 62 seen on `local/integration`,
+the difference being this fork's own 6. Hold until PR #26 or #31 gets maintainer
+engagement. This one is a shared-config change that buys upstream more than it
+buys this fork — the fork controls its own lock refreshes — so it is the least
+urgent of the held set. Title:
 `chore(lint): pin the ruff rule set so CI stops drifting with the ruff release`
 
 ```markdown
@@ -132,13 +136,13 @@ ruff <0.16 enabled ~123 rules, 0.16.0 enables ~831 (`ruff check --show-settings`
 Same tree, same config file, different verdict:
 
     cd zenith && uv run ruff check .   # ruff 0.15.6 from uv.lock -> All checks passed
-    uvx ruff check .                   # ruff 0.16.0             -> Found 62 errors
+    uvx ruff check .                   # ruff 0.16.0             -> Found 56 errors
 
 CI is green today only because `uv.lock` pins ruff 0.15.6 against a `ruff>=0.4`
 spec. A single `uv lock --upgrade` — or any contributor with a newer ruff on
-`PATH` — pulls 0.16.x and surfaces 62 findings across `src/` and `tests/`,
-almost all of it long-standing code that no PR touched. That turns a routine
-lock refresh into an unrelated 62-item cleanup, and it makes "does lint pass?"
+`PATH` — pulls 0.16.x and surfaces 56 findings across `src/` and `tests/`, all
+of it long-standing code that no open PR touched. That turns a routine lock
+refresh into an unrelated 56-item cleanup, and it makes "does lint pass?"
 un-answerable without knowing which ruff someone ran.
 
 ## Fix
@@ -160,16 +164,16 @@ Same ruff 0.16.0 binary, in isolation:
     ruff check . --isolated --target-version py311 --line-length 100 \
       --select E4,E7,E9,F        -> All checks passed
     ruff check . --isolated --target-version py311 --line-length 100
-                                 -> Found 62 errors
+                                 -> Found 56 errors
 
 With the change in place: `uv run ruff check .` clean, `uv run mypy src` clean
-(17 source files), `uv run pytest -q` 294 passed / 7 skipped (pre-existing
+(17 source files), `uv run pytest -q` 212 passed / 7 skipped (pre-existing
 real-agent smoke skips).
 
 ## Alternative
 
 If you would rather *adopt* the expanded 0.16 rule set than freeze the old one,
-that is the opposite change: select the new rules deliberately and fix all 62
+that is the opposite change: select the new rules deliberately and fix all 56
 findings in one sweep. It is much larger and touches code across the tree, so
 it seems worth an issue and a decision first. This PR is the conservative
 option — it locks in today's behavior and can be reverted in one line if you
