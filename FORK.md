@@ -51,6 +51,7 @@ change or depends on unmerged work).
 
 | Commit | Change | Upstream status |
 | --- | --- | --- |
+| `6c3fbb8` | Pin the ruff rule set (`lint.select` + `required-version`) so `ruff check` stops meaning something different per ruff release | fork-only for now; `upstream/ruff-rule-pin` on fork is ready to file (PR body below), held until #26/#31 get engagement |
 | `64f24fa` | Escape env values in the codex `config.toml` writer (quoted ACP commands emitted invalid TOML) | [PR #34](https://github.com/Intelligent-Internet/zenith/pull/34), filed 2026-07-28 from `upstream/toml-env-escaping`; motivated by #31 but **no code dependency** — applies cleanly to `origin/main`. Upstream variant drops the reviewer assertion (needs #26) |
 | `c76b945` | Custom worker ACP command cascades to same-provider validator/reviewer | on hold until #26/#31 get engagement; `upstream/acp-command-cascade` on fork is ready to file (PR body below) |
 | `02aaf73` | Scoped `CODEX_HOME` for the codex terminal reviewer | not filed (depends on PR #31) |
@@ -112,6 +113,70 @@ probably never exercised against a populated environment:
 
 Drafted and reviewed, held per the working rules. File from the named branch
 with the body below; delete the section once filed.
+
+### `6c3fbb8` — ruff rule-set pin (branch `upstream/ruff-rule-pin`)
+
+Hold until PR #26 or #31 gets maintainer engagement. This one is a shared-config
+change that buys upstream more than it buys this fork — the fork controls its own
+lock refreshes — so it is the least urgent of the held set. Title:
+`chore(lint): pin the ruff rule set so CI stops drifting with the ruff release`
+
+```markdown
+## Problem
+
+`[tool.ruff]` in `zenith/pyproject.toml` sets only `target-version` and
+`line-length`. It never pins a `select`, so the enabled rule set is whatever
+the installed ruff binary happens to default to — and that default changed:
+ruff <0.16 enabled ~123 rules, 0.16.0 enables ~831 (`ruff check --show-settings`).
+
+Same tree, same config file, different verdict:
+
+    cd zenith && uv run ruff check .   # ruff 0.15.6 from uv.lock -> All checks passed
+    uvx ruff check .                   # ruff 0.16.0             -> Found 62 errors
+
+CI is green today only because `uv.lock` pins ruff 0.15.6 against a `ruff>=0.4`
+spec. A single `uv lock --upgrade` — or any contributor with a newer ruff on
+`PATH` — pulls 0.16.x and surfaces 62 findings across `src/` and `tests/`,
+almost all of it long-standing code that no PR touched. That turns a routine
+lock refresh into an unrelated 62-item cleanup, and it makes "does lint pass?"
+un-answerable without knowing which ruff someone ran.
+
+## Fix
+
+Make the contract explicit instead of version-dependent:
+
+- `[tool.ruff.lint] select = ["E4", "E7", "E9", "F"]` — ruff's own pre-0.16
+  default, written down. No rule changes state, so no existing code is
+  affected.
+- `required-version = ">=0.15,<0.16"` — a mismatched binary now aborts with a
+  clear cause rather than silently linting under a different rule set.
+
+`uv.lock` is deliberately untouched.
+
+## Verification
+
+Same ruff 0.16.0 binary, in isolation:
+
+    ruff check . --isolated --target-version py311 --line-length 100 \
+      --select E4,E7,E9,F        -> All checks passed
+    ruff check . --isolated --target-version py311 --line-length 100
+                                 -> Found 62 errors
+
+With the change in place: `uv run ruff check .` clean, `uv run mypy src` clean
+(17 source files), `uv run pytest -q` 294 passed / 7 skipped (pre-existing
+real-agent smoke skips).
+
+## Alternative
+
+If you would rather *adopt* the expanded 0.16 rule set than freeze the old one,
+that is the opposite change: select the new rules deliberately and fix all 62
+findings in one sweep. It is much larger and touches code across the tree, so
+it seems worth an issue and a decision first. This PR is the conservative
+option — it locks in today's behavior and can be reverted in one line if you
+take the other path.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+```
 
 ### `c76b945` — ACP command cascade (branch `upstream/acp-command-cascade`)
 
