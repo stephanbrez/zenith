@@ -24,6 +24,26 @@ PR-first development untenable (at the time: one upstream merge in 24 days,
 - Keep the delta table below current: add a row when a change merges to
   `local/integration`, update it when upstream merges/rejects anything.
 
+### 🚫 Never run `ruff format` on this repo
+
+Lint only — `cd zenith && uv run ruff check .`. **Do not run
+`ruff format`**, and do not enable format-on-save for this checkout.
+
+This codebase has never been ruff-formatted: `ruff format --check` reports
+**42 of 45 files** would be reformatted, and that is equally true at the fork
+base (verify with `git show feb1d62:<file> | ruff format --check -`). Neither
+CI (`.github/workflows/ci.yml`) nor CONTRIBUTING.md invokes the formatter —
+only `ruff check`, `mypy src`, `pytest`. Formatting would rewrite nearly the
+whole tree, bury every real change in unrelated churn, and guarantee conflicts
+on the next upstream cherry-pick — for zero gain on a check nobody runs.
+
+⚠️ This **overrides the general "always run `ruff format`" convention** in
+`~/.config/agents/extras/rules/python-guidelines.md`. Formatting is not part
+of this project's contract; match the surrounding style by hand instead.
+
+Related: `ruff check` is version-pinned (`6c3fbb8`) — always invoke it as
+`uv run ruff check` so it resolves the locked 0.15.6, never `uvx ruff`.
+
 ## Independence tripwires
 
 Stop filing upstream PRs entirely (pulling continues) when **any** fires:
