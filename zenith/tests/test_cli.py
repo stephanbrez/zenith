@@ -244,6 +244,128 @@ class TestInit:
         assert isinstance(r.exception, ValueError)
         assert "ZENITH_WORKER_REASONING_EFFORT" in str(r.exception)
 
+    def test_claude_init_log_flags_write_env(
+        self, runner: CliRunner, workspace: Path, env: dict[str, str]
+    ) -> None:
+        log_path = workspace / "logs" / "zenith.log"
+        r = runner.invoke(
+            cli,
+            [
+                "init",
+                "--workspace-dir",
+                str(workspace),
+                "--agent",
+                "claude",
+                "--log-level",
+                "info",
+                "--log-file",
+                str(log_path),
+            ],
+        )
+        assert r.exit_code == 0, r.output
+
+        mcp = json.loads((workspace / ".mcp.json").read_text(encoding="utf-8"))
+        server_env = mcp["mcpServers"]["zenith"]["env"]
+        # Level is normalized to upper case; path is resolved.
+        assert server_env["ZENITH_LOG_LEVEL"] == "INFO"
+        assert server_env["ZENITH_LOG_FILE"] == str(log_path.resolve())
+
+    def test_codex_init_log_flags_write_env(
+        self, runner: CliRunner, workspace: Path, env: dict[str, str]
+    ) -> None:
+        log_path = workspace / "logs" / "zenith.log"
+        r = runner.invoke(
+            cli,
+            [
+                "init",
+                "--workspace-dir",
+                str(workspace),
+                "--agent",
+                "codex",
+                "--log-level",
+                "DEBUG",
+                "--log-file",
+                str(log_path),
+            ],
+        )
+        assert r.exit_code == 0, r.output
+
+        config = tomllib.loads(
+            (workspace / ".codex" / "config.toml").read_text(encoding="utf-8")
+        )
+        server_env = config["mcp_servers"]["zenith"]["env"]
+        assert server_env["ZENITH_LOG_LEVEL"] == "DEBUG"
+        assert server_env["ZENITH_LOG_FILE"] == str(log_path.resolve())
+
+    def test_init_forwards_inherited_log_env_without_flags(
+        self,
+        runner: CliRunner,
+        workspace: Path,
+        env: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("ZENITH_LOG_LEVEL", "INFO")
+        monkeypatch.setenv("ZENITH_LOG_FILE", "/var/log/zenith.log")
+
+        r = runner.invoke(cli, ["init", "--workspace-dir", str(workspace), "--agent", "claude"])
+        assert r.exit_code == 0, r.output
+
+        mcp = json.loads((workspace / ".mcp.json").read_text(encoding="utf-8"))
+        server_env = mcp["mcpServers"]["zenith"]["env"]
+        # Forwarded verbatim — the shell already resolved what it wanted.
+        assert server_env["ZENITH_LOG_LEVEL"] == "INFO"
+        assert server_env["ZENITH_LOG_FILE"] == "/var/log/zenith.log"
+
+    def test_init_log_flags_override_inherited_env(
+        self,
+        runner: CliRunner,
+        workspace: Path,
+        env: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("ZENITH_LOG_LEVEL", "DEBUG")
+        monkeypatch.setenv("ZENITH_LOG_FILE", "/elsewhere/old.log")
+        log_path = workspace / "logs" / "zenith.log"
+
+        r = runner.invoke(
+            cli,
+            [
+                "init",
+                "--workspace-dir",
+                str(workspace),
+                "--agent",
+                "claude",
+                "--log-level",
+                "warning",
+                "--log-file",
+                str(log_path),
+            ],
+        )
+        assert r.exit_code == 0, r.output
+
+        mcp = json.loads((workspace / ".mcp.json").read_text(encoding="utf-8"))
+        server_env = mcp["mcpServers"]["zenith"]["env"]
+        assert server_env["ZENITH_LOG_LEVEL"] == "WARNING"
+        assert server_env["ZENITH_LOG_FILE"] == str(log_path.resolve())
+
+    def test_init_rejects_unknown_log_level(
+        self, runner: CliRunner, workspace: Path, env: dict[str, str]
+    ) -> None:
+        r = runner.invoke(
+            cli,
+            [
+                "init",
+                "--workspace-dir",
+                str(workspace),
+                "--agent",
+                "claude",
+                "--log-level",
+                "verbose",
+            ],
+        )
+        assert r.exit_code != 0
+        assert "--log-level" in r.output
+
     def test_claude_init_writes_runtime_validator_env_names(
         self, runner: CliRunner, workspace: Path, env: dict[str, str]
     ) -> None:

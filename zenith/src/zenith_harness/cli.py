@@ -19,6 +19,10 @@ from .providers import (
 )
 from .storage import ProjectStore
 
+# UI validation only — server-side _configure_logging falls back to WARNING on
+# anything getattr(logging, ...) does not know.
+VALID_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
 RUNTIME_ENV_FORWARD_ALLOWLIST = (
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
@@ -34,6 +38,8 @@ RUNTIME_ENV_FORWARD_ALLOWLIST = (
     "GLM_API_KEY",
     "GLM_BASE_URL",
     "MAX_THINKING_TOKENS",
+    "ZENITH_LOG_LEVEL",
+    "ZENITH_LOG_FILE",
     "ZENITH_WORKER_REASONING_EFFORT",
     "ZENITH_VALIDATOR_REASONING_EFFORT",
     "ZENITH_TERMINAL_REVIEWER_REASONING_EFFORT",
@@ -77,6 +83,18 @@ def cli() -> None:
 @click.option("--worker-reasoning-effort", type=click.Choice(VALID_REASONING_EFFORTS), default=None)
 @click.option("--validator-reasoning-effort", type=click.Choice(VALID_REASONING_EFFORTS), default=None)
 @click.option("--terminal-reviewer-reasoning-effort", type=click.Choice(VALID_REASONING_EFFORTS), default=None)
+@click.option(
+    "--log-level",
+    type=click.Choice(VALID_LOG_LEVELS, case_sensitive=False),
+    default=None,
+    help="Persist ZENITH_LOG_LEVEL into the generated server config.",
+)
+@click.option(
+    "--log-file",
+    type=click.Path(),
+    default=None,
+    help="Persist ZENITH_LOG_FILE (durable Zenith log path) into the generated server config.",
+)
 @click.option("--zenith-home", type=click.Path(), default=None)
 @click.option("--workspace-dir", "workspace_dir", type=click.Path(exists=True), default=".")
 def init(
@@ -91,6 +109,8 @@ def init(
     worker_reasoning_effort: str | None,
     validator_reasoning_effort: str | None,
     terminal_reviewer_reasoning_effort: str | None,
+    log_level: str | None,
+    log_file: str | None,
     zenith_home: str | None,
     workspace_dir: str,
 ) -> None:
@@ -118,21 +138,26 @@ def init(
 
     # 1) MCP / Codex config
     storage_env = _storage_env(zenith_home=zenith_home, workspace=workspace, selection=selection)
-    # Flags are sugar for the ZENITH_*_REASONING_EFFORT env vars and win over
-    # valid inherited shell settings. An invalid value already in the
+    # Flags are sugar for the corresponding ZENITH_* env vars and win over
+    # valid inherited shell settings. An invalid effort value already in the
     # environment still fails fast at discover() above — flags override
     # settings, they don't mask broken ones (the same validation would raise
     # at server launch anyway).
-    effort_env = {
+    cli_env = {
         var: value
         for var, value in (
             ("ZENITH_WORKER_REASONING_EFFORT", worker_reasoning_effort),
             ("ZENITH_VALIDATOR_REASONING_EFFORT", validator_reasoning_effort),
             ("ZENITH_TERMINAL_REVIEWER_REASONING_EFFORT", terminal_reviewer_reasoning_effort),
+            ("ZENITH_LOG_LEVEL", log_level.upper() if log_level else None),
+            (
+                "ZENITH_LOG_FILE",
+                str(Path(log_file).expanduser().resolve()) if log_file else None,
+            ),
         )
         if value
     }
-    _write_bootstrap_config(workspace, selection, storage_env, effort_env)
+    _write_bootstrap_config(workspace, selection, storage_env, cli_env)
 
     # 2) Per-provider agents + orchestrator prompt
     for provider in selection.providers():
