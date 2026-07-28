@@ -51,6 +51,8 @@ change or depends on unmerged work).
 
 | Commit | Change | Upstream status |
 | --- | --- | --- |
+| `02aaf73` | Scoped `CODEX_HOME` for the codex terminal reviewer | not filed (depends on PR #31) |
+| `2fa9a62` | Terminal reviewer: `_meta` settingSources/skills isolation (claude) | PR pending (see below) |
 | `32907a2` | Wave transition events also written to the log | not filed (depends on progress notifications) |
 | `3e3a4d2` | `follow_up` patch op — ownership transfer from cleared work tasks | fork-only (schema change) |
 | `a7c462f` | Findings channel: worker/validator prompt guidance + `file_finding` tool | fork-only (tool-surface change) |
