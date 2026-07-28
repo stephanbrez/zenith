@@ -51,7 +51,7 @@ change or depends on unmerged work).
 
 | Commit | Change | Upstream status |
 | --- | --- | --- |
-| `c76b945` | Custom worker ACP command cascades to same-provider validator/reviewer | on hold until #26/#31 get engagement; `upstream/acp-command-cascade` on fork is ready to file (PR body: see commit message) |
+| `c76b945` | Custom worker ACP command cascades to same-provider validator/reviewer | on hold until #26/#31 get engagement; `upstream/acp-command-cascade` on fork is ready to file (PR body below) |
 | `02aaf73` | Scoped `CODEX_HOME` for the codex terminal reviewer | not filed (depends on PR #31) |
 | `2fa9a62` | Terminal reviewer: `_meta` settingSources/skills isolation (claude) | [PR #33](https://github.com/Intelligent-Internet/zenith/pull/33), filed 2026-07-27 |
 | `32907a2` | Wave transition events also written to the log | not filed (depends on progress notifications) |
@@ -71,3 +71,69 @@ Background for the 2026-07-27 changes (`ea38d25`..`32907a2`): findings from a
 real end-to-end mission, analyzed and verified against source in
 [`zenith-harness-findings.md`](zenith-harness-findings.md) (repo root;
 fork-only documentation, not part of any upstream PR).
+
+## Pending PR bodies
+
+Drafted and reviewed, held per the working rules. File from the named branch
+with the body below; delete the section once filed.
+
+### `c76b945` — ACP command cascade (branch `upstream/acp-command-cascade`)
+
+Hold until PR #26 or #31 gets maintainer engagement. Title:
+`fix(config): custom worker ACP command cascades to same-provider validator/reviewer`
+
+```markdown
+## Problem
+
+`HarnessConfig.resolved_validator_acp_command` resolves with a plain or-chain:
+
+    return (
+        self.validator_acp_command
+        or self.validator_provider.default_worker_acp_command   # always a non-empty string
+        or self.resolved_worker_acp_command                     # unreachable
+    )
+
+`default_worker_acp_command` is always truthy for every registered provider,
+so the third branch — inheriting the worker's command — is dead code. Set a
+custom worker command (`ZENITH_WORKER_ACP_COMMAND="claude-agent-acp --model
+..."`, a wrapper script, a test mock) with no per-role override, and
+validators silently run the stock adapter instead.
+`resolved_terminal_reviewer_acp_command` repeats the pattern one level up.
+The failure is silent: provider and reasoning-effort cascades resolve
+correctly, only the command diverges.
+
+The codebase already contains the correct logic:
+`ProviderSelection.resolved_validation_worker_acp_command` (providers.py)
+compares provider names — same provider inherits the custom command; a
+provider *switch* falls back to that provider's default. But `config.py` is
+what `for_role()` consults at dispatch time, so the write side
+(`selection.env()`) and the read side (`HarnessConfig.discover()`) of the
+same configuration disagree.
+
+## Fix
+
+Make the two `config.py` properties match the `providers.py` cascade:
+
+- explicit `ZENITH_VALIDATOR_ACP_COMMAND` /
+  `ZENITH_TERMINAL_REVIEWER_ACP_COMMAND` still win unconditionally;
+- same provider as the cascade parent → inherit the parent's resolved
+  command;
+- different provider → that provider's default command.
+
+No behavior change for setups that set per-role commands explicitly, or that
+use provider defaults throughout.
+
+## Tests
+
+- Regression: custom worker command + same-provider validator/reviewer →
+  inherited, including through `for_role()` (fails before the fix).
+- Provider switch → provider default (pins unchanged behavior).
+- Explicit per-role override beats inheritance (fails before the fix).
+- Consistency: `ProviderSelection` round-tripped through `env()` must
+  resolve identically in `HarnessConfig` (fails before the fix).
+
+`uv run pytest`: 216 passed, 7 skipped (pre-existing real-agent smoke
+skips) on top of `main`.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+```
