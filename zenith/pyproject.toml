@@ -72,3 +72,11 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+# Freeze the rule set: ruff <0.16 enabled ~123 rules by default, 0.16 enables
+# ~831. Without an explicit select, `ruff check` means something different per
+# ruff release. required-version makes a mismatched binary fail loudly instead
+# of silently linting under a different contract.
+required-version = ">=0.15,<0.16"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
