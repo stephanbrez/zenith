@@ -141,6 +141,19 @@ inherit the variable and append to the same file, so every line carries a
 
 If the path cannot be opened, Zenith warns and keeps running on stderr only.
 
+Shell exports only reach Zenith when the host agent inherits them. To bake
+logging into the workspace instead, pass the equivalent `zenith init` flags —
+they persist the two env vars into the generated server config
+(`.mcp.json` / `.codex/config.toml`), so every future session logs without
+any export:
+
+```bash
+zenith init --log-level INFO --log-file ~/.zenith/logs/zenith.log
+```
+
+Exported `ZENITH_LOG_LEVEL` / `ZENITH_LOG_FILE` values present at `zenith
+init` time are persisted the same way; the flags win if both are set.
+
 ## How Zenith Works
 
 <p align="center">
