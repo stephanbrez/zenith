@@ -51,7 +51,7 @@ change or depends on unmerged work).
 
 | Commit | Change | Upstream status |
 | --- | --- | --- |
-| `c76b945` | Custom worker ACP command cascades to same-provider validator/reviewer | PR pending (`upstream/acp-command-cascade` pushed) |
+| `c76b945` | Custom worker ACP command cascades to same-provider validator/reviewer | on hold until #26/#31 get engagement; `upstream/acp-command-cascade` on fork is ready to file (PR body: see commit message) |
 | `02aaf73` | Scoped `CODEX_HOME` for the codex terminal reviewer | not filed (depends on PR #31) |
 | `2fa9a62` | Terminal reviewer: `_meta` settingSources/skills isolation (claude) | [PR #33](https://github.com/Intelligent-Internet/zenith/pull/33), filed 2026-07-27 |
 | `32907a2` | Wave transition events also written to the log | not filed (depends on progress notifications) |
