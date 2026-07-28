@@ -16,6 +16,7 @@ Environment variables read from os.environ:
   ZENITH_NODE_ID       — node id to embed in handoff
   ZENITH_NODE_TYPE     — work | validate | terminal_review (handoff shape)
   MOCK_ACP_SESSION_PARAMS_PATH — if set, dump session/new params here (JSON)
+  MOCK_ACP_ENV_DUMP_PATH — if set, dump CODEX_HOME observations here (JSON)
   ZENITH_VALIDATION_PASSED — '1' to mark items passed=true (validate only)
   MOCK_ACP_CRASH       — '1' to exit immediately without writing
   MOCK_ACP_REQUEST_ATTENTION — '1' to set request_attention=true
@@ -67,6 +68,21 @@ def _write_handoff() -> None:
     tmp.replace(target)
 
 
+def _dump_env() -> None:
+    """Record what a codex process would observe about its CODEX_HOME."""
+    path = os.environ.get("MOCK_ACP_ENV_DUMP_PATH")
+    if not path:
+        return
+    codex_home = os.environ.get("CODEX_HOME", "")
+    home = Path(codex_home) if codex_home else None
+    payload = {
+        "CODEX_HOME": codex_home,
+        "CODEX_HOME_HAD_AUTH": bool(home and (home / "auth.json").is_file()),
+        "CODEX_HOME_HAD_AGENTS_MD": bool(home and (home / "AGENTS.md").is_file()),
+    }
+    Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def _response(req_id, result):
     return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
@@ -111,6 +127,7 @@ def main() -> None:
         elif method == "session/set_mode":
             resp = _response(req_id, {})
         elif method == "session/prompt":
+            _dump_env()
             _write_handoff()
             resp = _response(req_id, {"stopReason": "end_turn"})
         else:

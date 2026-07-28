@@ -6,9 +6,11 @@ import json
 import logging
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, ClassVar, Coroutine, Literal
@@ -155,6 +157,93 @@ def _terminal_reviewer_session_meta(provider) -> dict[str, Any] | None:
             }
         }
     }
+
+
+# Operational files seeded into the terminal reviewer's scoped CODEX_HOME.
+# Everything else in the real home — AGENTS.md, rules/, skills/, memory and
+# state sqlite stores, sessions/, history.jsonl — is ambient context or
+# prior-mission memory and stays out by omission.
+_SCOPED_CODEX_HOME_FILES: tuple[str, ...] = (
+    "auth.json",
+    "config.toml",
+    "models_cache.json",
+    "installation_id",
+)
+
+
+def _real_codex_home() -> Path:
+    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+
+
+def _create_scoped_codex_home(provider) -> Path | None:
+    """Give the terminal reviewer a scoped CODEX_HOME without ambient context.
+
+    Codex loads `$CODEX_HOME/AGENTS.md` (global instructions) and its
+    memory/session sqlite stores unconditionally — there is no per-session
+    knob equivalent to claude-agent-acp's `settingSources`
+    (`project_doc_max_bytes` governs only workspace docs, and zeroing it
+    would kill the repo-level AGENTS.md too). So for codex the reviewer
+    gets a disposable CODEX_HOME seeded with operational files only:
+
+    - `auth.json` — credentials. Copied, not symlinked: a token refresh
+      done as an atomic rename-over would replace a symlink with a real
+      file and detach the refreshed credential from the real home.
+    - `config.toml` — the user's model/provider config, honored like any
+      other explicit user configuration (`ZENITH_*_ACP_COMMAND` etc.).
+    - `models_cache.json`, `installation_id` — avoid re-fetch/re-generate
+      noise; no instruction or memory content.
+
+    Deliberately absent: `AGENTS.md`, `rules/`, `skills/`, `memories*`,
+    `state*`, `sessions/`, `history.jsonl` — the global-instruction and
+    prior-context channels the reviewer's independence contract forbids.
+    Codex regenerates system skills in a fresh home on startup.
+
+    Workers and validators keep the real CODEX_HOME by design: global
+    rules files are how users enforce cross-project conventions.
+    """
+    if getattr(provider, "name", None) != "codex":
+        return None
+    real_home = _real_codex_home()
+    scoped = Path(tempfile.mkdtemp(prefix="zenith-codex-home-"))
+    for name in _SCOPED_CODEX_HOME_FILES:
+        src = real_home / name
+        try:
+            if src.is_file():
+                shutil.copy2(src, scoped / name)
+        except OSError as exc:
+            logger.warning(
+                "scoped CODEX_HOME: could not copy %s: %s", src, exc
+            )
+    return scoped
+
+
+def _cleanup_scoped_codex_home(scoped: Path | None) -> None:
+    """Write a refreshed auth.json back to the real CODEX_HOME, then delete.
+
+    Codex may refresh tokens mid-session; the refreshed credential lands in
+    the scoped copy. Best-effort write-back (atomic replace) keeps the real
+    home current so later sessions do not run on a stale refresh token.
+    Concurrent codex sessions sharing the real home are last-writer-wins,
+    same as codex's own behavior.
+    """
+    if scoped is None:
+        return
+    try:
+        scoped_auth = scoped / "auth.json"
+        real_auth = _real_codex_home() / "auth.json"
+        if scoped_auth.is_file():
+            new = scoped_auth.read_bytes()
+            old = real_auth.read_bytes() if real_auth.is_file() else None
+            if new != old:
+                tmp = real_auth.with_name("auth.json.zenith-tmp")
+                tmp.write_bytes(new)
+                tmp.replace(real_auth)
+    except OSError as exc:
+        logger.warning(
+            "scoped CODEX_HOME: auth.json write-back failed: %s", exc
+        )
+    finally:
+        shutil.rmtree(scoped, ignore_errors=True)
 
 
 _CODEX_C_OVERRIDE_RE = re.compile(r'-c\s+(\w+)=["\']([^"\']*)["\']')
@@ -930,6 +1019,11 @@ class ACPNodeRunner:
             role_config.worker_reasoning_effort,
             acp_command,
         )
+        # Codex counterpart of the claude _meta isolation below: a scoped
+        # CODEX_HOME without global AGENTS.md / rules / memory stores.
+        scoped_codex_home = _create_scoped_codex_home(role_config.worker_provider)
+        if scoped_codex_home is not None:
+            acp_env["CODEX_HOME"] = str(scoped_codex_home)
         logger.info(
             "ACP spawn for terminal review (provider=%s, effort=%s): "
             "command=%r, CODEX_CONFIG=%s",
@@ -938,15 +1032,19 @@ class ACPNodeRunner:
             _redact_secrets(acp_command),
             _redact_secrets(acp_env.get("CODEX_CONFIG", "<none>")),
         )
-        process = await asyncio.create_subprocess_shell(
-            acp_command,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=workspace_dir,
-            env=acp_env,
-            limit=SUBPROCESS_STREAM_LIMIT,
-        )
+        try:
+            process = await asyncio.create_subprocess_shell(
+                acp_command,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=workspace_dir,
+                env=acp_env,
+                limit=SUBPROCESS_STREAM_LIMIT,
+            )
+        except BaseException:
+            _cleanup_scoped_codex_home(scoped_codex_home)
+            raise
         tracker = ACPProgressTracker(callback=progress_callback)
         client = ACPClient(
             process, workspace_dir, session_update_handler=tracker.handle_session_update
@@ -1004,6 +1102,9 @@ class ACPNodeRunner:
             await _wait_for_process_exit(process, timeout=5)
             await client.cleanup(close_main_process=False)
             await _close_subprocess(process, timeout=0)
+            # After the reviewer process is gone: write back a refreshed
+            # auth.json and remove the scoped home.
+            _cleanup_scoped_codex_home(scoped_codex_home)
             if mcp_process.returncode is None:
                 try:
                     mcp_process.terminate()
