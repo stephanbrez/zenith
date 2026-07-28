@@ -72,6 +72,41 @@ real end-to-end mission, analyzed and verified against source in
 [`zenith-harness-findings.md`](zenith-harness-findings.md) (repo root;
 fork-only documentation, not part of any upstream PR).
 
+## Bug-hunting heuristic: configuration-variation boundaries
+
+Every serious bug found so far (2026-07-27) lives where a default and an
+override can disagree silently — the benchmark environment was almost
+certainly default-config and context-clean, the one machine shape where
+none of these are observable:
+
+- ACP command cascade (`c76b945`): only fires with a custom worker command
+  *and no per-role overrides*. Invisible if every role is set explicitly,
+  or nothing is customized.
+- codex-acp `-c` overrides (`9b80498`, PR #31): only fires on the npm
+  adapter build, which ignores argv `-c` — invisible on whatever build the
+  authors ran.
+- Terminal-reviewer context injection (`2fa9a62`/`02aaf73`, PR #33): only
+  *matters* when the user has global CLAUDE.md/AGENTS.md content worth
+  leaking. A bare CI account has nothing to inject, so the reviewer's
+  independence looks intact there.
+
+When hunting for the next one, start where an override path exists but was
+probably never exercised against a populated environment:
+
+- `_ensure_claude_settings` "respect pre-existing files" path: a
+  user-authored `.claude/settings.json` in the workspace silently skips the
+  `defaultMode` fix — does every setting combination there still spawn?
+- `ZENITH_*` env discovery in `config.py`: every `os.environ.get` with a
+  fallback is a default/override pair; check each is actually reachable
+  and validated (the reasoning-effort validation exists because one
+  wasn't).
+- Path relocations: `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `ZENITH_HOME`,
+  XDG-style moves — anything that hardcodes `~/.codex` or `~/.claude`
+  instead of resolving the env var is wrong on relocated setups.
+- Provider asymmetry: any feature implemented for one provider's adapter
+  (claude/codex/hermes) with a "no-op" branch for the others — check the
+  no-op is a decision, not an omission.
+
 ## Pending PR bodies
 
 Drafted and reviewed, held per the working rules. File from the named branch
