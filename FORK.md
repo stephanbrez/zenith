@@ -24,6 +24,52 @@ PR-first development untenable (at the time: one upstream merge in 24 days,
 - Keep the delta table below current: add a row when a change merges to
   `local/integration`, update it when upstream merges/rejects anything.
 
+### Carried upstream PRs — keep no snapshot branches
+
+Once an upstream PR is cherry-picked onto `local/integration`, the carried
+commit is the only copy that matters. **Do not keep a local branch holding
+the PR as fetched** — it duplicates a ref that upstream serves on demand,
+goes stale silently, and reads like unmerged work. Deleted 2026-07-29:
+`pr-14-gate-checkpoints`, `pr-25-wave-lock`, `pr-17`.
+
+Refetch any PR head instead — this always reproduces the exact commit the
+cherry-pick came from:
+
+```bash
+git fetch origin pull/14/head:pr-14   # PR number → throwaway local branch
+```
+
+Currently carried from the open queue: **#14 → `3ddf1a6`**, **#25 →
+`6017363`**. Patch-ids differ from the PR heads (rebased onto the fork
+line); authorship is preserved, so `git log --format='%an'` still shows the
+upstream author.
+
+**When a carried PR gets new commits.** Refetch the head, diff it against
+what was carried, and take only the delta:
+
+```bash
+git fetch origin pull/25/head:pr-25
+git log --oneline 4e78f75..pr-25          # 4e78f75 = head at cherry-pick time
+git cherry-pick -x <new commits>          # onto a topic branch off local/integration
+```
+
+Never re-cherry-pick the whole PR over the carried commit. Record the new
+head SHA in the delta row so the next diff has a base. Delete the throwaway
+branch afterwards.
+
+**When a carried PR is merged upstream.** The "prefer upstream's variant"
+rule applies: drop the fork's copy rather than keep both. On the next sync,
+merge `origin/main` into `local/integration` and expect the carried commit
+to fall out as already-applied. Where it conflicts, take upstream's side
+unless the fork deliberately diverged — if it did, that divergence is now
+its own delta row, not a leftover of the cherry-pick. Then update the row
+from "Cherry-pick of upstream PR #N" to "merged upstream, local copy
+dropped". Precedent: PR #17 (per-role reasoning effort) merged as `a21c071`
+and is in `local/integration`; its staging branch was deleted, not kept.
+
+Check state with `gh pr view <n> --repo Intelligent-Internet/zenith`, not
+with a local branch's position.
+
 ### 🚫 Never run `ruff format` on this repo
 
 Lint only — `cd zenith && uv run ruff check .`. **Do not run
@@ -84,8 +130,8 @@ change or depends on unmerged work).
 | `426495b` | `Task.revalidates` — explicit gate revalidation + supersede coverage guard | fork-only (schema change) |
 | `81aeffd` | Progress notifications + heartbeat during blocking waves | not filed (depends on PR #25) |
 | `ea38d25` | Orchestrator prompt: digests are hypotheses, not evidence | [PR #32](https://github.com/Intelligent-Internet/zenith/pull/32), filed 2026-07-27 |
-| `3ddf1a6` | Cherry-pick of upstream [PR #14](https://github.com/Intelligent-Internet/zenith/pull/14) (gate checkpoints + skill validation) | open upstream since 2026-07-02 |
-| `6017363` | Cherry-pick of upstream [PR #25](https://github.com/Intelligent-Internet/zenith/pull/25) (wave lock held in worker thread) | open upstream since 2026-07-11 |
+| `3ddf1a6` | Cherry-pick of upstream [PR #14](https://github.com/Intelligent-Internet/zenith/pull/14) (gate checkpoints + skill validation) | open upstream since 2026-07-02; carried from head `5aca97c` (last upstream activity 2026-07-03) |
+| `6017363` | Cherry-pick of upstream [PR #25](https://github.com/Intelligent-Internet/zenith/pull/25) (wave lock held in worker thread) | open upstream since 2026-07-11; carried from head `4e78f75` (last upstream activity 2026-07-11) |
 | `6d618ca` | `ZENITH_LOG_FILE` durable log | not filed |
 | `6f3cc39` | Log ACP spawn command + `CODEX_CONFIG` per dispatch | not filed |
 | `9b80498` | Route codex `-c` overrides through `CODEX_CONFIG` | [PR #31](https://github.com/Intelligent-Internet/zenith/pull/31), open, no review |
