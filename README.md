@@ -154,6 +154,25 @@ zenith init --log-level INFO --log-file ~/.zenith/logs/zenith.log
 Exported `ZENITH_LOG_LEVEL` / `ZENITH_LOG_FILE` values present at `zenith
 init` time are persisted the same way; the flags win if both are set.
 
+**Per-role providers and ACP commands.** `--worker-acp-command`,
+`--validator-acp-command` and `--terminal-reviewer-acp-command` (plus the
+matching `--*-provider` and `--*-reasoning-effort` flags) are written into
+the generated server config verbatim, exactly as passed — including when two
+roles share the same command, so the file always shows what each role runs:
+
+```bash
+zenith init --agent claude \
+  --worker-acp-command 'claude-agent-acp --model opus' \
+  --validator-acp-command 'claude-agent-acp --model sonnet' \
+  --terminal-reviewer-acp-command 'claude-agent-acp --model sonnet'
+```
+
+A role you leave unset is *not* written out. It inherits at runtime along
+the cascade worker → validator → terminal reviewer, falling back to the
+provider's default command only when that role switches provider. So a
+config carrying just `ZENITH_WORKER_ACP_COMMAND` runs all three roles on the
+worker's command.
+
 **Long waves and client idle timeouts.** `advance_project` and `end_mission`
 block for the whole wave — a single worker task can legitimately run for an
 hour. Zenith streams MCP progress notifications while a wave runs: every

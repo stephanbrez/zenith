@@ -9,6 +9,7 @@ import pytest
 from click.testing import CliRunner
 
 from zenith_harness.cli import cli
+from zenith_harness.config import HarnessConfig
 
 
 @pytest.fixture
@@ -149,9 +150,6 @@ class TestInit:
         `-c key="value"` is the supported splice shape for codex config, so
         every role's command can carry double quotes. Interpolating them raw
         terminates the TOML string early and corrupts the managed block.
-        The three commands differ so `ProviderSelection.env()` emits all
-        three vars — it suppresses a role whose resolved command matches the
-        previous role's.
         """
         worker_cmd = 'codex-acp -c model="gpt-5.6-luna"'
         validator_cmd = 'codex-acp -c model="gpt-5.6-terra"'
@@ -450,6 +448,165 @@ class TestInit:
         mcp_env = mcp["mcpServers"]["zenith"]["env"]
         assert "ZENITH_TERMINAL_REVIEWER_PROVIDER" not in mcp_env
         assert "ZENITH_TERMINAL_REVIEWER_ACP_COMMAND" not in mcp_env
+
+    def test_explicit_role_acp_commands_survive_matching_parent(
+        self, runner: CliRunner, workspace: Path, env: dict[str, str]
+    ) -> None:
+        """A command passed per role is persisted even when it equals its
+        cascade parent's.
+
+        Inherited values are deduped against the parent (worker → validator
+        → terminal reviewer) because the read side re-derives them. An
+        *explicit* flag must not be swallowed by that dedup: the generated
+        config is what the user inspects, and a hand-edit of the parent's
+        command would otherwise silently retarget the child role.
+        """
+        worker_cmd = "claude-agent-acp --model opus"
+        shared_cmd = "claude-agent-acp --model sonnet"
+
+        r = runner.invoke(
+            cli,
+            [
+                "init",
+                "--workspace-dir",
+                str(workspace),
+                "--agent",
+                "claude",
+                "--worker-acp-command",
+                worker_cmd,
+                "--validator-acp-command",
+                shared_cmd,
+                "--terminal-reviewer-acp-command",
+                shared_cmd,
+            ],
+        )
+        assert r.exit_code == 0, r.output
+
+        mcp = json.loads((workspace / ".mcp.json").read_text())
+        mcp_env = mcp["mcpServers"]["zenith"]["env"]
+        assert mcp_env["ZENITH_WORKER_ACP_COMMAND"] == worker_cmd
+        assert mcp_env["ZENITH_VALIDATOR_ACP_COMMAND"] == shared_cmd
+        # Fails before the fix — identical to the validator's, so dropped.
+        assert mcp_env["ZENITH_TERMINAL_REVIEWER_ACP_COMMAND"] == shared_cmd
+
+    def test_explicit_role_providers_survive_matching_parent(
+        self, runner: CliRunner, workspace: Path, env: dict[str, str]
+    ) -> None:
+        """Same rule for the per-role provider flags, so the two stay
+        consistent: naming the worker's own provider explicitly still
+        records it."""
+        r = runner.invoke(
+            cli,
+            [
+                "init",
+                "--workspace-dir",
+                str(workspace),
+                "--agent",
+                "claude",
+                "--validator-provider",
+                "claude",
+                "--terminal-reviewer-provider",
+                "claude",
+            ],
+        )
+        assert r.exit_code == 0, r.output
+
+        mcp = json.loads((workspace / ".mcp.json").read_text())
+        mcp_env = mcp["mcpServers"]["zenith"]["env"]
+        assert mcp_env["ZENITH_VALIDATOR_PROVIDER"] == "claude"
+        assert mcp_env["ZENITH_TERMINAL_REVIEWER_PROVIDER"] == "claude"
+
+    def test_generated_env_resolves_same_reviewer_command_at_dispatch(
+        self,
+        runner: CliRunner,
+        workspace: Path,
+        env: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Writing the explicit command changes the config, not dispatch.
+
+        Both configs — the minimal one (reviewer inherited) and the explicit
+        one — must resolve to the same command through `for_role`, proving
+        the fix is additive rather than a behavior change.
+        """
+        worker_cmd = "claude-agent-acp --model opus"
+        shared_cmd = "claude-agent-acp --model sonnet"
+
+        r = runner.invoke(
+            cli,
+            [
+                "init",
+                "--workspace-dir",
+                str(workspace),
+                "--agent",
+                "claude",
+                "--worker-acp-command",
+                worker_cmd,
+                "--validator-acp-command",
+                shared_cmd,
+                "--terminal-reviewer-acp-command",
+                shared_cmd,
+            ],
+        )
+        assert r.exit_code == 0, r.output
+
+        mcp = json.loads((workspace / ".mcp.json").read_text())
+        mcp_env = mcp["mcpServers"]["zenith"]["env"]
+
+        for key, value in mcp_env.items():
+            monkeypatch.setenv(key, value)
+        explicit = HarnessConfig.discover()
+
+        # The pre-fix config: reviewer command omitted, inherited instead.
+        monkeypatch.delenv("ZENITH_TERMINAL_REVIEWER_ACP_COMMAND")
+        inherited = HarnessConfig.discover()
+
+        assert (
+            explicit.for_role("terminal_reviewer").worker_acp_command
+            == inherited.for_role("terminal_reviewer").worker_acp_command
+            == shared_cmd
+        )
+
+    def test_init_env_round_trips_without_shedding_keys(
+        self,
+        runner: CliRunner,
+        workspace: Path,
+        env: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A selection rebuilt from the generated env re-emits the same keys.
+
+        `HarnessConfig.provider_selection` reconstructs a `ProviderSelection`
+        from the env vars; every command it carries came from an explicit
+        var, so none may be dropped on the way back out.
+        """
+        shared_cmd = "claude-agent-acp --model sonnet"
+        r = runner.invoke(
+            cli,
+            [
+                "init",
+                "--workspace-dir",
+                str(workspace),
+                "--agent",
+                "claude",
+                "--worker-acp-command",
+                "claude-agent-acp --model opus",
+                "--validator-acp-command",
+                shared_cmd,
+                "--terminal-reviewer-acp-command",
+                shared_cmd,
+            ],
+        )
+        assert r.exit_code == 0, r.output
+
+        mcp = json.loads((workspace / ".mcp.json").read_text())
+        mcp_env = mcp["mcpServers"]["zenith"]["env"]
+        for key, value in mcp_env.items():
+            monkeypatch.setenv(key, value)
+
+        round_tripped = HarnessConfig.discover().provider_selection.env()
+        assert round_tripped["ZENITH_TERMINAL_REVIEWER_ACP_COMMAND"] == shared_cmd
+        assert round_tripped["ZENITH_VALIDATOR_ACP_COMMAND"] == shared_cmd
 
     def test_three_distinct_providers_all_env_written(
         self, runner: CliRunner, workspace: Path, env: dict[str, str]

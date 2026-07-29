@@ -82,26 +82,48 @@ class ProviderSelection:
         )
 
     def env(self) -> dict[str, str]:
+        """Env vars for the generated server config (.mcp.json / config.toml).
+
+        Two rules, in order:
+
+        1. **Explicit wins.** A value the user set per role is always
+           emitted, even when it equals what the role would have inherited
+           anyway. Dropping it produces a config that cannot be read
+           without knowing the cascade, and silently retargets the role if
+           the parent's value is later hand-edited in the file.
+        2. **Inherited dedups.** A value the role only got from its cascade
+           parent (worker → validator → terminal reviewer) is omitted; the
+           read side re-derives it identically in `HarnessConfig`
+           (config.py), so `zenith init` with no per-role flags keeps
+           writing a minimal config.
+        """
         env: dict[str, str] = {
             "ZENITH_ORCHESTRATOR_PROVIDER": self.orchestrator.name,
             "ZENITH_WORKER_PROVIDER": self.worker.name,
         }
         if self.resolved_worker_acp_command:
             env["ZENITH_WORKER_ACP_COMMAND"] = self.resolved_worker_acp_command
-        if self.resolved_validation_worker.name != self.worker.name:
+        if (
+            self.validation_worker is not None
+            or self.resolved_validation_worker.name != self.worker.name
+        ):
             env["ZENITH_VALIDATOR_PROVIDER"] = self.resolved_validation_worker.name
         validation_command = self.resolved_validation_worker_acp_command
-        if (
-            validation_command != self.resolved_worker_acp_command
-            and validation_command is not None
+        if validation_command is not None and (
+            self.validation_worker_acp_command is not None
+            or validation_command != self.resolved_worker_acp_command
         ):
             env["ZENITH_VALIDATOR_ACP_COMMAND"] = validation_command
-        if self.resolved_terminal_reviewer.name != self.resolved_validation_worker.name:
+        if (
+            self.terminal_reviewer is not None
+            or self.resolved_terminal_reviewer.name
+            != self.resolved_validation_worker.name
+        ):
             env["ZENITH_TERMINAL_REVIEWER_PROVIDER"] = self.resolved_terminal_reviewer.name
         tr_command = self.resolved_terminal_reviewer_acp_command
-        if (
-            tr_command != self.resolved_validation_worker_acp_command
-            and tr_command is not None
+        if tr_command is not None and (
+            self.terminal_reviewer_acp_command is not None
+            or tr_command != self.resolved_validation_worker_acp_command
         ):
             env["ZENITH_TERMINAL_REVIEWER_ACP_COMMAND"] = tr_command
         return env
