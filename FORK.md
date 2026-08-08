@@ -39,9 +39,10 @@ cherry-pick came from:
 git fetch origin pull/14/head:pr-14   # PR number → throwaway local branch
 ```
 
-Currently carried from the open queue: **#14 → `3ddf1a6`**, **#25 →
-`6017363`**. Patch-ids differ from the PR heads (rebased onto the fork
-line); authorship is preserved, so `git log --format='%an'` still shows the
+Currently carried: **#14 → `3ddf1a6`** (declined upstream — a permanent
+fork delta, not a pending cherry-pick) and **#25 → `6017363`** (still open
+upstream). Patch-ids differ from the PR heads (rebased onto the fork line);
+authorship is preserved, so `git log --format='%an'` still shows the
 upstream author.
 
 **When a carried PR gets new commits.** Refetch the head, diff it against
@@ -66,6 +67,18 @@ its own delta row, not a leftover of the cherry-pick. Then update the row
 from "Cherry-pick of upstream PR #N" to "merged upstream, local copy
 dropped". Precedent: PR #17 (per-role reasoning effort) merged as `a21c071`
 and is in `local/integration`; its staging branch was deleted, not kept.
+
+**When a carried PR is declined upstream.** A decline is not a merge and not
+a defect report — the "prefer upstream's variant" rule has nothing to prefer,
+and the commit will never fall out of a sync. Re-read the maintainer's stated
+reason before deciding: a deferral on *upstream's* design roadmap ("we may
+remove this") does not transfer to this fork, which runs the code today and
+may already depend on it. Keep the commit, move its row from "Cherry-pick of
+upstream PR #N" to a permanent fork-only delta, and record in the row *why* it
+is load-bearing here — a future sync will otherwise re-open the question with
+the reasoning lost. If the decline hints that upstream may delete something
+this fork builds on, note it as a tripwire-2 watch item rather than acting on
+it. Precedent: PR #14 (`3ddf1a6`), declined 2026-07-03.
 
 Same for a PR **this fork filed**: on merge, delete the branch it was filed
 from — locally *and* on `fork` — since upstream now serves the content.
@@ -136,7 +149,7 @@ change or depends on unmerged work).
 | `426495b` | `Task.revalidates` — explicit gate revalidation + supersede coverage guard | fork-only (schema change) |
 | `81aeffd` | Progress notifications + heartbeat during blocking waves | not filed (depends on PR #25) |
 | `ea38d25` | Orchestrator prompt: digests are hypotheses, not evidence | [PR #32](https://github.com/Intelligent-Internet/zenith/pull/32), filed 2026-07-27 |
-| `3ddf1a6` | Cherry-pick of upstream [PR #14](https://github.com/Intelligent-Internet/zenith/pull/14) (gate checkpoints + skill validation) | open upstream since 2026-07-02; carried from head `5aca97c` (last upstream activity 2026-07-03) |
+| `3ddf1a6` | Cherry-pick of upstream [PR #14](https://github.com/Intelligent-Internet/zenith/pull/14) (gate checkpoints + skill validation) | **declined upstream** 2026-07-03 — design deferral on the gate-checkpoint node ("we might consider removing this type of node"), with no line-level review and no code objection; PR left open at head `5aca97c`. **Kept fork-only, permanently** — see the declined-PR rule above. The gate half closes a gap in upstream's *own* prompt (it names "checkpoint gate reports" as a distinct shape and forbids relying on stripped runtime fields, but `_gate_report` headed both cases `Gate report from`); the skill half is the only guard against unknown skill names, since `load_skill` is never called on the dispatch path |
 | `6017363` | Cherry-pick of upstream [PR #25](https://github.com/Intelligent-Internet/zenith/pull/25) (wave lock held in worker thread) | open upstream since 2026-07-11; carried from head `4e78f75` (last upstream activity 2026-07-11) |
 | `6d618ca` | `ZENITH_LOG_FILE` durable log | not filed |
 | `6f3cc39` | Log ACP spawn command + `CODEX_CONFIG` per dispatch | not filed |
