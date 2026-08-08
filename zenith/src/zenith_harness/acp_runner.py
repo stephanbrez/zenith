@@ -93,7 +93,10 @@ class ACPError(Exception):
 
 
 def _augment_acp_command(
-    command: str, provider, reasoning_effort: str | None = None
+    command: str,
+    provider,
+    reasoning_effort: str | None = None,
+    model: str | None = None,
 ) -> str:
     """Append provider-specific config flags to the ACP launch command.
 
@@ -106,17 +109,25 @@ def _augment_acp_command(
     `config.VALID_REASONING_EFFORTS` at discovery); None keeps the
     historical "xhigh" default.
 
+    `model` is the per-role pin from ZENITH_<ROLE>_MODEL (validated against
+    `config.MODEL_ID_PATTERN` at discovery); None leaves codex on the model in
+    its own config. Claude takes its pin through ANTHROPIC_MODEL in
+    `_acp_subprocess_env` instead — claude-agent-acp has no model flag.
+
     For hermes the command is passed through unchanged.
     """
     name = getattr(provider, "name", None)
     if name == "codex":
         effort = reasoning_effort or "xhigh"
-        return (
+        augmented = (
             command
             + ' -c sandbox_mode="danger-full-access"'
             + ' -c approval_policy="never"'
             + f' -c model_reasoning_effort="{effort}"'
         )
+        if model:
+            augmented += f' -c model="{model}"'
+        return augmented
     # hermes: no-op
     return command
 
@@ -286,6 +297,7 @@ def _acp_subprocess_env(
     provider,
     reasoning_effort: str | None = None,
     acp_command: str | None = None,
+    model: str | None = None,
 ) -> dict[str, str]:
     """Build the env handed to an ACP-agent subprocess.
 
@@ -305,10 +317,21 @@ def _acp_subprocess_env(
     3. Zenith's three safety keys (`sandbox_mode`, `approval_policy`,
        `model_reasoning_effort`) — always win, since sandbox/approval
        are autonomy-safety requirements and effort is the per-role
-       resolved value.
+       resolved value. A per-role `model` pin joins them for the same
+       reason: it is the resolved value for this lane, so it outranks a
+       model named in an ambient `CODEX_CONFIG` or spliced into
+       `ZENITH_*_ACP_COMMAND`. Setting it here rather than letting layer 2
+       carry it keeps that precedence independent of where the `-c` flags
+       happen to sit in the command string.
 
     The `-c` flags remain in argv for `-c`-honoring codex-acp builds
     (harmless if ignored by the npm adapter).
+
+    For claude, a per-role `model` pin travels as ANTHROPIC_MODEL — the highest
+    priority input claude-agent-acp reads when picking a model, above
+    settings.json. An unset pin leaves any inherited value alone, which means
+    an unpinned lane runs on an ambient ANTHROPIC_MODEL if one is set rather
+    than on claude-agent-acp's own default.
 
     For hermes the env is passed through unchanged.
     """
@@ -341,7 +364,11 @@ def _acp_subprocess_env(
         codex_config["sandbox_mode"] = "danger-full-access"
         codex_config["approval_policy"] = "never"
         codex_config["model_reasoning_effort"] = effort
+        if model:
+            codex_config["model"] = model
         env["CODEX_CONFIG"] = json.dumps(codex_config)
+    elif name == "claude" and model:
+        env["ANTHROPIC_MODEL"] = model
     # hermes: no special env needed
     return env
 
@@ -787,6 +814,7 @@ class ACPNodeRunner:
             acp_command,
             role_config.worker_provider,
             role_config.worker_reasoning_effort,
+            role_config.worker_model,
         )
 
         workspace_dir = str(Path(cwd).expanduser().resolve() if cwd else store.workspace_dir(project_id))
@@ -844,6 +872,7 @@ class ACPNodeRunner:
             role_config.worker_provider,
             role_config.worker_reasoning_effort,
             acp_command,
+            role_config.worker_model,
         )
         logger.info(
             "ACP spawn for node %s (role=%s, provider=%s, effort=%s): "
@@ -972,6 +1001,7 @@ class ACPNodeRunner:
             acp_command,
             role_config.worker_provider,
             role_config.worker_reasoning_effort,
+            role_config.worker_model,
         )
 
         workspace_dir = str(store.workspace_dir(project_id))
@@ -1018,6 +1048,7 @@ class ACPNodeRunner:
             role_config.worker_provider,
             role_config.worker_reasoning_effort,
             acp_command,
+            role_config.worker_model,
         )
         # Codex counterpart of the claude _meta isolation below: a scoped
         # CODEX_HOME without global AGENTS.md / rules / memory stores.
