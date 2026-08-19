@@ -31,6 +31,7 @@ def _apply_selection_env(
         monkeypatch.setenv(key, value)
     return HarnessConfig.discover()
 
+
 _EFFORT_ENV_VARS = (
     "ZENITH_WORKER_REASONING_EFFORT",
     "ZENITH_VALIDATOR_REASONING_EFFORT",
