@@ -40,10 +40,11 @@ git fetch origin pull/14/head:pr-14   # PR number → throwaway local branch
 ```
 
 Currently carried: **#14 → `3ddf1a6`** (declined upstream — a permanent
-fork delta, not a pending cherry-pick) and **#25 → `6017363`** (still open
-upstream). Patch-ids differ from the PR heads (rebased onto the fork line);
-authorship is preserved, so `git log --format='%an'` still shows the
-upstream author.
+fork delta, not a pending cherry-pick), **#25 → `6017363`** (still open
+upstream), and **#35 → `3646100` + `5121352`** (still open upstream; carried
+from head `f704a8d`). Patch-ids differ from the PR heads (rebased onto the
+fork line); authorship is preserved, so `git log --format='%an'` still shows
+the upstream author.
 
 **When a carried PR gets new commits.** Refetch the head, diff it against
 what was carried, and take only the delta:
@@ -136,8 +137,10 @@ change or depends on unmerged work).
 
 | Commit | Change | Upstream status |
 | --- | --- | --- |
-| `1bc4cb7` | Explicit per-role ACP commands/providers always reach the generated config, instead of being deduped against the cascade parent | not filed (depends on PR #26 — `origin/main`'s `env()` has no `ZENITH_TERMINAL_REVIEWER_*` keys to fix) |
-| `643d675` | `zenith init --log-level/--log-file` flags persist the log env vars into the generated server config | not filed; belongs with the observability commits (`6d618ca`/`6f3cc39`) if those are ever filed |
+| `5121352` | Cherry-pick of upstream [PR #35](https://github.com/Intelligent-Internet/zenith/pull/35), commit 2 (per-role model pin: `ZENITH_{WORKER,VALIDATOR,TERMINAL_REVIEWER}_MODEL` + `--*-model` flags) | open upstream since 2026-08-09; carried from head `f704a8d`. **Adapted for #31**, which the PR body anticipated: the codex pin is set as an explicit layer-3 `CODEX_CONFIG` key (with `sandbox_mode`/`approval_policy`/`model_reasoning_effort`) instead of riding argv, which the npm codex-acp adapter ignores. Layer 3 rather than layer 2 so the resolved role value outranks an ambient `CODEX_CONFIG` model and one spliced into `ZENITH_*_ACP_COMMAND`, independent of `-c` ordering in the command string. Five fork tests cover that channel; the PR's own tests only reached argv |
+| `3646100` | Cherry-pick of upstream [PR #35](https://github.com/Intelligent-Internet/zenith/pull/35), commit 1 (init resolves every role — flag, then ambient var, then cascade — and writes what it resolved; assets installed for env-resolved roles; foreign-binary warning; `discover()` `ValueError` as a usage error) | open upstream since 2026-08-09; carried from head `f704a8d`. The write-side half this fork already had via #26 + `1bc4cb7` covers **flags**; this covers the **ambient environment**, which `env()` cannot see. `_write_bootstrap_config` layers `cli_env` over `ProviderSelection.env()`, so the resolved values supersede env()'s output for the same keys — the two agree by construction on any flag-set lane |
+| `1bc4cb7` | Explicit per-role ACP commands/providers always reach the generated config, instead of being deduped against the cascade parent | not filed (depends on PR #26 — `origin/main`'s `env()` has no `ZENITH_TERMINAL_REVIEWER_*` keys to fix). Carrying #35 (`3646100`) made init write *every* resolved role provider, so the "unset flags emit no terminal-reviewer keys" test filed with #26 became false here: it is now `test_claude_init_writes_inherited_terminal_reviewer_provider`, asserting the resolved provider is written while an inherited ACP command is still omitted. A deliberate divergence from #26 as filed — restore it only if upstream rejects #35's always-write direction |
+| `643d675` | `zenith init --log-level/--log-file` flags persist the log env vars into the generated server config | not filed; belongs with the observability commits (`6d618ca`/`6f3cc39`) if those are ever filed. Reshaped while carrying #35: the log vars moved out of the renamed effort dict into their own `log_env`, leaving upstream's `effort_env` and its `cli_env = {**effort_env, **model_env, **role_env}` line intact. The delta at that spot is now one added dict plus `**log_env` — keep it that way, so the next sync of `init` does not conflict over a name this fork chose |
 | `6c3fbb8` | Pin the ruff rule set (`lint.select` + `required-version`) so `ruff check` stops meaning something different per ruff release | fork-only for now; `upstream/ruff-rule-pin` on fork is ready to file (PR body below), held until #26/#31 get engagement |
 | `64f24fa` | Escape env values in the codex `config.toml` writer (quoted ACP commands emitted invalid TOML) | **merged upstream** as `2c26f6a` ([PR #34](https://github.com/Intelligent-Internet/zenith/pull/34), 2026-08-07); `cli.py` fell out as already-applied on the sync merge. The test stays forked: upstream's variant drops the reviewer command (needs #26) and documents an `env()` suppression this fork removed in `1bc4cb7` |
 | `c76b945` | Custom worker ACP command cascades to same-provider validator/reviewer | on hold until #26/#31 get engagement; `upstream/acp-command-cascade` on fork is ready to file (PR body below) |
