@@ -15,11 +15,11 @@ from pathlib import Path
 
 import pytest
 
+from zenith_harness import coordinator
 from zenith_harness.config import HarnessConfig
 from zenith_harness.controller import ProjectController
 from zenith_harness.dispatcher import DispatchRequest, MockDispatcher, MockTerminalReviewer
 from zenith_harness.models import (
-    AttentionNeeded,
     Task,
     TaskList,
     TerminalReviewHandoff,
@@ -48,7 +48,15 @@ def config(harness_home: Path) -> HarnessConfig:
 
 
 def _task(tid: str, target: str) -> Task:
-    return Task(id=tid, type="work", body="b", targets=[target], skill="s")
+    # A real bundled skill: these tasks go through submit_plan, and the
+    # carried PR #14 skill validation rejects names it cannot load.
+    return Task(
+        id=tid,
+        type="work",
+        body="b",
+        targets=[target],
+        skill="engineering-mission-playbook",
+    )
 
 
 def _write_contract(store: ProjectStore, pid: str, mission_id: str, assertion: str) -> None:
@@ -138,6 +146,78 @@ def test_lost_attempt_without_marker_still_synthesizes_failure(config, workspace
 
     env = controller.advance_project(pid)
     assert env.state.state == "attention_needed"
+
+
+def test_reconciled_handoff_writes_the_markdown_mirror(config, workspace) -> None:
+    """Reconcile must write attempts/<spawn_ts>__<node>.md, not only read JSON.
+
+    On the dispatch path save_attempt() wrote both. Under bounded dispatch the
+    worker writes the JSON itself, so reconcile is the only remaining writer of
+    the durable markdown record — and gate reports hand the orchestrator that
+    path, so a missing mirror is a report citing a file that does not exist.
+    """
+    def slow(req: DispatchRequest) -> WorkHandoff:
+        time.sleep(5)
+        return WorkHandoff(node_id=req.task.id, done=True, report="late")
+
+    controller, pid = _started_controller(config, workspace, slow)
+    controller.advance_project(pid)
+
+    ts = controller.store.load_task_state(pid, "mission-001")
+    spawn_ts = ts.tasks["a"].last_attempt
+    # The worker writes only the JSON cursor, exactly as the worker MCP server
+    # does through ZENITH_HANDOFF_PATH.
+    handoff_path = controller.store.attempt_path(pid, "mission-001", spawn_ts, "a")
+    handoff_path.parent.mkdir(parents=True, exist_ok=True)
+    handoff_path.write_text(
+        WorkHandoff(node_id="a", done=True, report="done").model_dump_json()
+    )
+    mirror = controller.store.attempt_report_path(pid, "mission-001", spawn_ts, "a")
+    assert not mirror.exists()
+
+    controller.advance_project(pid)
+
+    assert mirror.exists(), "reconcile left the durable markdown mirror unwritten"
+    assert "done" in mirror.read_text(encoding="utf-8")
+
+
+def test_marker_stays_fresh_while_the_dispatch_thread_runs(
+    config, workspace, monkeypatch
+) -> None:
+    """A long worker must not age into "lost".
+
+    The marker is stamped once at dispatch, so with a fixed stamp `attempt_stale_s`
+    measures elapsed time rather than liveness: a worker slower than the
+    threshold — the case bounded dispatch exists for — would be declared lost
+    while it is still running. The refresh thread keeps the stamp current.
+    """
+    monkeypatch.setattr(coordinator, "MARKER_REFRESH_SECONDS", 0.05)
+    object.__setattr__(config, "attempt_stale_s", 0.3)
+
+    def slow(req: DispatchRequest) -> WorkHandoff:
+        time.sleep(3)
+        return WorkHandoff(node_id=req.task.id, done=True, report="late")
+
+    controller, pid = _started_controller(config, workspace, slow)
+    controller.advance_project(pid)
+
+    ts = controller.store.load_task_state(pid, "mission-001")
+    spawn_ts = ts.tasks["a"].last_attempt
+    marker = (
+        controller.store.attempts_runtime_dir(pid, "mission-001")
+        / f"{spawn_ts}__a.dispatched"
+    )
+    first = marker.stat().st_mtime
+
+    # Wait past attempt_stale_s while the worker is still running.
+    time.sleep(0.6)
+    assert marker.stat().st_mtime > first, "marker was never re-stamped"
+
+    env = controller.advance_project(pid)
+    # Still in flight, not synthesized into a failure.
+    assert env.state.state == "mission_running"
+    ts = controller.store.load_task_state(pid, "mission-001")
+    assert ts.status_of("a") == "running"
 
 
 def test_stale_marker_counts_as_lost(config, workspace) -> None:

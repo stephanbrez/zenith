@@ -9,6 +9,8 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import logging
+import os
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Literal
@@ -49,6 +51,10 @@ logger = logging.getLogger(__name__)
 
 
 StepKind = Literal["idle", "advanced", "attention_needed", "terminal", "in_progress"]
+
+# How often an abandoned dispatch thread re-stamps its in-flight markers. Any
+# value far below `attempt_stale_s` works; the cost is one utime per marker.
+MARKER_REFRESH_SECONDS: float = 60.0
 
 
 @dataclass(frozen=True)
@@ -191,7 +197,8 @@ class MissionCoordinator:
         )
         try:
             handoff, completed = self._call_with_timeout(
-                lambda: self.dispatcher.dispatch(request)
+                lambda: self.dispatcher.dispatch(request),
+                [(mid, task.id, spawn_ts)],
             )
         except Exception as exc:  # noqa: BLE001
             self._clear_dispatch_marker(mid, task.id, spawn_ts)
@@ -330,7 +337,8 @@ class MissionCoordinator:
             for attempt in batch_attempts
         ]
         handoffs, completed = self._call_with_timeout(
-            lambda: self._dispatch_requests(requests)
+            lambda: self._dispatch_requests(requests),
+            [(mid, attempt.task.id, attempt.spawn_ts) for attempt in batch_attempts],
         )
         if not completed:
             # Bounded-wait law: workers write their own handoff files; the next
@@ -436,12 +444,43 @@ class MissionCoordinator:
         except FileNotFoundError:
             pass
 
-    def _call_with_timeout(self, fn):
+    def _refresh_markers_while_running(
+        self,
+        fut: concurrent.futures.Future,
+        markers: list[tuple[str, str, str]],
+    ) -> None:
+        """Keep in-flight markers fresh for as long as `fut` is running.
+
+        A marker stamped once at dispatch encodes "how long ago did this start",
+        but the question `_reconcile_pending_attempts` asks is "is this attempt
+        still alive". Those agree only until `attempt_stale_s` (6h): past it, a
+        worker that is merely slow — the case bounded dispatch exists to support
+        — reads as lost, and reconcile synthesizes a failure for a task whose
+        real handoff is still coming. Touching the marker while the dispatch
+        thread lives makes staleness mean what it claims: the dispatch died.
+        """
+        while True:
+            concurrent.futures.wait([fut], timeout=MARKER_REFRESH_SECONDS)
+            if fut.done():
+                return
+            for mid, node_id, spawn_ts in markers:
+                try:
+                    os.utime(self._dispatch_marker_path(mid, node_id, spawn_ts), None)
+                except OSError:
+                    # Marker already cleared (a later wave reconciled this
+                    # attempt) or unwritable — nothing left worth refreshing.
+                    return
+
+    def _call_with_timeout(self, fn, markers: list[tuple[str, str, str]] | None = None):
         """Run fn on a helper thread, bounded by config.dispatch_wait_s.
 
         Returns (result, True) on completion, (None, False) on timeout. A
         timed-out thread is left to finish in the background — its result is
         discarded because the worker's own handoff file is the durable record.
+
+        `markers` names the in-flight attempts this call owns; while the
+        abandoned thread runs, their markers are kept fresh so a long worker is
+        never mistaken for a lost one.
         """
         wait_s = getattr(self.store.config, "dispatch_wait_s", 50.0)
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -450,6 +489,12 @@ class MissionCoordinator:
             return fut.result(timeout=wait_s), True
         except concurrent.futures.TimeoutError:
             pool.shutdown(wait=False)
+            if markers:
+                threading.Thread(
+                    target=self._refresh_markers_while_running,
+                    args=(fut, markers),
+                    daemon=True,
+                ).start()
             return None, False
 
     def _apply_handoff(
@@ -993,6 +1038,17 @@ class MissionCoordinator:
                     in_flight.append(task.id)
                 continue
             self._clear_dispatch_marker(mid, task.id, last.spawn_ts)
+            # Mirror the worker-written JSON into the durable markdown record.
+            # The dispatch path got this from save_attempt(); under bounded
+            # dispatch the worker writes the JSON itself and reconcile is the
+            # only place left that can write the mirror. Skipping it leaves
+            # attempts/<spawn_ts>__<node>.md missing for every task that
+            # outlived its dispatch wait — and gate evaluation hands the
+            # orchestrator that exact path (see _evaluate_gate), so the report
+            # would cite a file that was never written.
+            self.store.save_attempt(
+                self.project_id, mid, last.spawn_ts, task.id, read_handoff
+            )
             attention.extend(
                 self._apply_handoff_collect(mid, task, read_handoff, last.spawn_ts)
             )
