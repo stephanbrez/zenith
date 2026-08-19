@@ -173,6 +173,54 @@ provider's default command only when that role switches provider. So a
 config carrying just `ZENITH_WORKER_ACP_COMMAND` runs all three roles on the
 worker's command.
 
+Providers themselves are written out for every role, resolved as init saw
+them — flag first, then an exported `ZENITH_*_PROVIDER`, then the cascade.
+The generated config therefore names what each lane will actually run,
+without you having to replay the cascade to read it.
+
+**Per-role model pins.** `--worker-model`, `--validator-model` and
+`--terminal-reviewer-model` (env: `ZENITH_WORKER_MODEL`,
+`ZENITH_VALIDATOR_MODEL`, `ZENITH_TERMINAL_REVIEWER_MODEL`) pin a specific
+model per role, so a mission can grind through work on one model and gate it
+on another:
+
+```bash
+zenith init --agent claude \
+  --worker-model sonnet \
+  --validator-model opus
+```
+
+Delivery is provider-specific and needs no flags of yours: a codex lane gets
+the pin through `CODEX_CONFIG` (and as a `-c model="..."` override for
+codex-acp builds that read argv), while a claude lane gets `ANTHROPIC_MODEL`
+in the agent subprocess, since `claude-agent-acp` has no model flag. A pin set
+this way outranks a model named in an ambient `CODEX_CONFIG` or spliced into
+that role's `ZENITH_*_ACP_COMMAND`.
+
+Pins inherit down the same worker → validator → terminal reviewer cascade,
+but **never across a provider boundary** — a codex worker's `gpt-5.5` is not
+handed to a claude validator, which would set `ANTHROPIC_MODEL=gpt-5.5` and
+break every session on that lane. Such a lane runs unpinned instead.
+
+Two asymmetries with the reasoning-effort settings are deliberate:
+
+- An exported `ZENITH_*_MODEL` reaches a server you launch from that same
+  shell, but `zenith init` does **not** persist it into the workspace config
+  the way it persists efforts. A model id carries no record of which provider
+  it was chosen for, so baking an inherited one in would land a leftover
+  codex pin on whatever provider that workspace runs. Pins enter a workspace
+  through the flags only, checked against the provider resolved for that lane.
+- `ANTHROPIC_MODEL` is the exception and stays forwarded: it is
+  provider-scoped rather than lane-scoped, and it is the documented way to
+  pin claude globally. An *unpinned* claude lane therefore runs on an ambient
+  `ANTHROPIC_MODEL` if one is exported.
+
+There is no way to spell "run this lane unpinned": `--validator-model ""` is
+rejected rather than silently ignored, since a same-provider lane always
+inherits the pin above it. Model ids are open-ended (aliases, pinned ids,
+Bedrock/Vertex ARNs), so they are validated by character set — letters,
+digits and `._:/@[]-` — rather than against a list of known names.
+
 **Long waves and client idle timeouts.** `advance_project` and `end_mission`
 block for the whole wave — a single worker task can legitimately run for an
 hour. Zenith streams MCP progress notifications while a wave runs: every
