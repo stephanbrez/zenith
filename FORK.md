@@ -41,10 +41,11 @@ git fetch origin pull/14/head:pr-14   # PR number → throwaway local branch
 
 Currently carried: **#14 → `3ddf1a6`** (declined upstream — a permanent
 fork delta, not a pending cherry-pick), **#25 → `6017363`** (still open
-upstream), and **#35 → `3646100` + `5121352`** (still open upstream; carried
-from head `f704a8d`). Patch-ids differ from the PR heads (rebased onto the
-fork line); authorship is preserved, so `git log --format='%an'` still shows
-the upstream author.
+upstream), **#35 → `3646100` + `5121352`** (still open upstream; carried
+from head `f704a8d`), and **#36 → `6873b77`** (still open upstream; carried
+from head `70993ec`, fixed up in `0cc7936`). Patch-ids differ from the PR
+heads (rebased onto the fork line); authorship is preserved, so
+`git log --format='%an'` still shows the upstream author.
 
 **When a carried PR gets new commits.** Refetch the head, diff it against
 what was carried, and take only the delta:
@@ -137,6 +138,8 @@ change or depends on unmerged work).
 
 | Commit | Change | Upstream status |
 | --- | --- | --- |
+| `0cc7936` | Bounded-dispatch fix-ups: reconcile writes the durable markdown mirror (`save_attempt`) instead of only reading the worker's JSON, and an abandoned dispatch thread re-stamps the `.dispatched` markers it owns while it runs | fork-only, but **both are defects in PR #36 as filed, not fork interactions** — verified against `origin/main`, where `_evaluate_gate` cites `attempt_report_path` just the same (so gate reports named an unwritten file for every task that outlived its dispatch wait), and where `attempt_stale_s` measures elapsed time rather than liveness (a worker slower than 6h — the case bounded dispatch exists for — read as lost). Offer upstream if #36 ever gets engagement. The test-fixture half *is* a fork interaction: #36's tasks named `skill="s"`, which the carried #14 validation rejects at `submit_plan` |
+| `6873b77` | Cherry-pick of upstream [PR #36](https://github.com/Intelligent-Internet/zenith/pull/36) (bounded dispatch wait: `StepResult.in_progress`, `.dispatched` markers, `ZENITH_DISPATCH_WAIT_S`/`ZENITH_ATTEMPT_STALE_S`) | open upstream since 2026-08-12; carried from head `70993ec`. Fixed up in `0cc7936` — do not carry it without those. Reviewed against the carried #25 (`6017363`): safe, because the timeout path discards only the dispatch *return value*, so an abandoned thread touches nothing but its own attempt JSON and never `task-state.json`; the next wave sees a fresh marker and skips the task as in-flight rather than stubbing an in-flight validator, which was #25's failure mode. Our `81aeffd` heartbeat is now belt-and-braces for `advance_project` but still load-bearing for `end_mission`, which still blocks on terminal review |
 | `5121352` | Cherry-pick of upstream [PR #35](https://github.com/Intelligent-Internet/zenith/pull/35), commit 2 (per-role model pin: `ZENITH_{WORKER,VALIDATOR,TERMINAL_REVIEWER}_MODEL` + `--*-model` flags) | open upstream since 2026-08-09; carried from head `f704a8d`. **Adapted for #31**, which the PR body anticipated: the codex pin is set as an explicit layer-3 `CODEX_CONFIG` key (with `sandbox_mode`/`approval_policy`/`model_reasoning_effort`) instead of riding argv, which the npm codex-acp adapter ignores. Layer 3 rather than layer 2 so the resolved role value outranks an ambient `CODEX_CONFIG` model and one spliced into `ZENITH_*_ACP_COMMAND`, independent of `-c` ordering in the command string. Five fork tests cover that channel; the PR's own tests only reached argv |
 | `3646100` | Cherry-pick of upstream [PR #35](https://github.com/Intelligent-Internet/zenith/pull/35), commit 1 (init resolves every role — flag, then ambient var, then cascade — and writes what it resolved; assets installed for env-resolved roles; foreign-binary warning; `discover()` `ValueError` as a usage error) | open upstream since 2026-08-09; carried from head `f704a8d`. The write-side half this fork already had via #26 + `1bc4cb7` covers **flags**; this covers the **ambient environment**, which `env()` cannot see. `_write_bootstrap_config` layers `cli_env` over `ProviderSelection.env()`, so the resolved values supersede env()'s output for the same keys — the two agree by construction on any flag-set lane |
 | `1bc4cb7` | Explicit per-role ACP commands/providers always reach the generated config, instead of being deduped against the cascade parent | not filed (depends on PR #26 — `origin/main`'s `env()` has no `ZENITH_TERMINAL_REVIEWER_*` keys to fix). Carrying #35 (`3646100`) made init write *every* resolved role provider, so the "unset flags emit no terminal-reviewer keys" test filed with #26 became false here: it is now `test_claude_init_writes_inherited_terminal_reviewer_provider`, asserting the resolved provider is written while an inherited ACP command is still omitted. A deliberate divergence from #26 as filed — restore it only if upstream rejects #35's always-write direction |

@@ -221,11 +221,26 @@ inherits the pin above it. Model ids are open-ended (aliases, pinned ids,
 Bedrock/Vertex ARNs), so they are validated by character set — letters,
 digits and `._:/@[]-` — rather than against a list of known names.
 
-**Long waves and client idle timeouts.** `advance_project` and `end_mission`
-block for the whole wave — a single worker task can legitimately run for an
-hour. Zenith streams MCP progress notifications while a wave runs: every
-state transition (task dispatched/cleared/failed, gate evaluated, attention
-opened) plus a heartbeat every 30 seconds (override with
+**Long waves and client idle timeouts.** A worker task can legitimately run
+for an hour, and the ACP dispatcher blocks for the worker's entire session.
+Two mechanisms keep that from turning into a dead-looking orchestrator call.
+
+First, the dispatch wait is bounded. `advance_project` waits
+`ZENITH_DISPATCH_WAIT_S` (default 50s, chosen to sit under MCP client
+timeouts) and then returns with workers still in flight rather than holding
+the call. Nothing is lost by returning early: workers write their handoff
+files directly to the store, and the next `advance_project` reconciles
+whichever have landed. In-flight attempts carry a `.dispatched` marker, kept
+fresh while their dispatch is alive, so a slow worker is never confused with
+one whose dispatch died — only a missing or stale marker (older than
+`ZENITH_ATTEMPT_STALE_S`, default 6h) counts as a lost attempt. Keep calling
+`advance_project` while the mission is running; a call that returns with work
+still in flight is a normal result, not an error.
+
+Second, `end_mission` still blocks for terminal review, and a wave can still
+take a while between returns. Zenith streams MCP progress notifications while
+one runs: every state transition (task dispatched/cleared/failed, gate
+evaluated, attention opened) plus a heartbeat every 30 seconds (override with
 `ZENITH_PROGRESS_HEARTBEAT_SECONDS`). This keeps well-behaved clients from
 aborting the call on idle timeout and lets the orchestrator distinguish a
 slow worker from a wedged one. The same transition events are also written
