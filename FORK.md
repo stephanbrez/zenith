@@ -67,6 +67,12 @@ from "Cherry-pick of upstream PR #N" to "merged upstream, local copy
 dropped". Precedent: PR #17 (per-role reasoning effort) merged as `a21c071`
 and is in `local/integration`; its staging branch was deleted, not kept.
 
+Same for a PR **this fork filed**: on merge, delete the branch it was filed
+from — locally *and* on `fork` — since upstream now serves the content.
+Deleted 2026-08-19 after PR #34 merged: `upstream/toml-env-escaping` (both
+copies), plus `stephan/reasoning-effort-cli`, a leftover staging branch for
+work that had already landed via PR #17.
+
 Check state with `gh pr view <n> --repo Intelligent-Internet/zenith`, not
 with a local branch's position.
 
@@ -120,7 +126,7 @@ change or depends on unmerged work).
 | `1bc4cb7` | Explicit per-role ACP commands/providers always reach the generated config, instead of being deduped against the cascade parent | not filed (depends on PR #26 — `origin/main`'s `env()` has no `ZENITH_TERMINAL_REVIEWER_*` keys to fix) |
 | `643d675` | `zenith init --log-level/--log-file` flags persist the log env vars into the generated server config | not filed; belongs with the observability commits (`6d618ca`/`6f3cc39`) if those are ever filed |
 | `6c3fbb8` | Pin the ruff rule set (`lint.select` + `required-version`) so `ruff check` stops meaning something different per ruff release | fork-only for now; `upstream/ruff-rule-pin` on fork is ready to file (PR body below), held until #26/#31 get engagement |
-| `64f24fa` | Escape env values in the codex `config.toml` writer (quoted ACP commands emitted invalid TOML) | [PR #34](https://github.com/Intelligent-Internet/zenith/pull/34), filed 2026-07-28 from `upstream/toml-env-escaping`; motivated by #31 but **no code dependency** — applies cleanly to `origin/main`. Upstream variant drops the reviewer assertion (needs #26) |
+| `64f24fa` | Escape env values in the codex `config.toml` writer (quoted ACP commands emitted invalid TOML) | **merged upstream** as `2c26f6a` ([PR #34](https://github.com/Intelligent-Internet/zenith/pull/34), 2026-08-07); `cli.py` fell out as already-applied on the sync merge. The test stays forked: upstream's variant drops the reviewer command (needs #26) and documents an `env()` suppression this fork removed in `1bc4cb7` |
 | `c76b945` | Custom worker ACP command cascades to same-provider validator/reviewer | on hold until #26/#31 get engagement; `upstream/acp-command-cascade` on fork is ready to file (PR body below) |
 | `02aaf73` | Scoped `CODEX_HOME` for the codex terminal reviewer | not filed (depends on PR #31) |
 | `2fa9a62` | Terminal reviewer: `_meta` settingSources/skills isolation (claude) | [PR #33](https://github.com/Intelligent-Internet/zenith/pull/33), filed 2026-07-27 |
