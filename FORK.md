@@ -4,8 +4,11 @@ This checkout is an **independent line** descended from
 [Intelligent-Internet/zenith](https://github.com/Intelligent-Internet/zenith)
 (remote `origin`), published at
 [stephanbrez/zenith](https://github.com/stephanbrez/zenith) (remote `fork`).
-`local/integration` is the durable branch this fork runs. It is not kept in
-sync with upstream and is not expected to merge back.
+`main` on `fork` is the durable branch this fork runs. It is not kept in
+sync with upstream and is not expected to merge back. It was renamed from
+`local/integration` on 2026-08-20 — the old name described integrating
+upstream with local work, which no longer happens, and it left `fork`'s
+default branch pointing at a bare mirror of upstream.
 
 Decided 2026-08-20, superseding the 2026-07-27 fork-primary-but-syncing
 posture. Two things forced it. First, upstream engages with small
@@ -20,7 +23,7 @@ effects.
 
 ## Working rules
 
-- Develop on small topic branches off `local/integration`; test with
+- Develop on small topic branches off `main`; test with
   `uv run pytest` in `zenith/`; merge fast-forward; push to `fork`.
 - Never shape code for upstream mergeability. There is no reconciliation
   obligation and no pending-cherry-pick state.
@@ -29,7 +32,7 @@ effects.
   `server.py`, `coordinator.py`, `config.py`). This is a preference, not a
   rule — do not contort a design or refactor working code to honor it.
 - Keep the delta table below current: add a row when a change merges to
-  `local/integration`. The table is a **provenance and rationale record**, not
+  `main`. The table is a **provenance and rationale record**, not
   a sync ledger — it explains why the fork is the way it is.
 
 ## Reviewing upstream
@@ -68,8 +71,8 @@ Contributions still go through a pull request from `fork`: the GitHub API
 reports pull-only permission on `origin`, so being listed as a contributor
 after PR #34 does not grant push or review rights.
 
-**Cut contribution branches from `origin/main`, never from
-`local/integration`.** A contribution is an independent piece of work that
+**Cut contribution branches from `origin/main`, never from this fork's
+`main`.** A contribution is an independent piece of work that
 happens to also exist here — not an export of the fork line. This is already
 the practice: `upstream/acp-command-cascade` (PR #38) is cut from
 `origin/main` @ `2c26f6a` and carries the fix plus its tests, nothing else.
