@@ -71,8 +71,8 @@ after PR #34 does not grant push or review rights.
 **Cut contribution branches from `origin/main`, never from
 `local/integration`.** A contribution is an independent piece of work that
 happens to also exist here — not an export of the fork line. This is already
-the practice: `upstream/ruff-rule-pin` is cut from `origin/main` @ `a21c071`
-and carries one file.
+the practice: `upstream/acp-command-cascade` (PR #38) is cut from
+`origin/main` @ `2c26f6a` and carries the fix plus its tests, nothing else.
 
 Worth offering upstream: self-contained fixes with a clear defect and a test,
 which is the shape upstream demonstrably merges. Not worth offering:
@@ -129,9 +129,9 @@ pending action.
 | `3646100` | Init resolves every role — flag, then ambient var, then cascade — and writes what it resolved; assets installed for env-resolved roles; foreign-binary warning; `discover()` `ValueError` as a usage error | Adopted from upstream PR #35, commit 1 (head `f704a8d`); now fork-owned. The write-side half this fork already had via `385d0ac` + `1bc4cb7` covers **flags**; this covers the **ambient environment**, which `env()` cannot see. `_write_bootstrap_config` layers `cli_env` over `ProviderSelection.env()`, so resolved values supersede `env()`'s output for the same keys — the two agree by construction on any flag-set lane |
 | `1bc4cb7` | Explicit per-role ACP commands/providers always reach the generated config, instead of being deduped against the cascade parent | Fork-only. A deliberate divergence from this fork's own PR #26 as filed: carrying `3646100` made init write *every* resolved role provider, so #26's "unset flags emit no terminal-reviewer keys" test became false here. It is now `test_claude_init_writes_inherited_terminal_reviewer_provider`, asserting the resolved provider is written while an inherited ACP command is still omitted |
 | `643d675` | `zenith init --log-level/--log-file` flags persist the log env vars into the generated server config | Fork-only; belongs with the observability commits (`6d618ca`/`6f3cc39`). Reshaped while adopting `3646100`: the log vars live in their own `log_env` rather than the effort dict, leaving `effort_env` and `cli_env = {**effort_env, **model_env, **role_env}` intact — one added dict plus `**log_env` |
-| `6c3fbb8` | Pin the ruff rule set (`lint.select` + `required-version`) so `ruff check` stops meaning something different per ruff release | Fork-only. `upstream/ruff-rule-pin` on `fork` holds a contribution-ready version cut from `origin/main` @ `a21c071`; see the pending body below |
+| `6c3fbb8` | Pin the ruff rule set (`lint.select` + `required-version`) so `ruff check` stops meaning something different per ruff release | Fork-only, **deliberately not offered** (decided 2026-08-20; branch `upstream/ruff-rule-pin` deleted both copies). A shared-config policy change that buys upstream more than it buys this fork, which controls its own lock refreshes — and it invites an adopt-the-0.16-rules discussion this fork has no stake in |
 | `64f24fa` | Escape env values in the codex `config.toml` writer (quoted ACP commands emitted invalid TOML) | Filed upstream and **merged** as `2c26f6a` (PR #34, 2026-08-07) — the one demonstrated example of what upstream accepts. The test stays forked: upstream's variant drops the reviewer command and documents an `env()` suppression `1bc4cb7` removed |
-| `c76b945` | Custom worker ACP command cascades to same-provider validator/reviewer | Fork-only. `upstream/acp-command-cascade` on `fork` holds a contribution-ready version; see the pending body below |
+| `c76b945` | Custom worker ACP command cascades to same-provider validator/reviewer | Filed upstream as [PR #38](https://github.com/Intelligent-Internet/zenith/pull/38), 2026-08-20, from `upstream/acp-command-cascade` rebased onto `2c26f6a`. A silent defect in upstream's own or-chain with a test that fails before the fix — the shape PR #34 showed upstream merges |
 | `02aaf73` | Scoped `CODEX_HOME` for the codex terminal reviewer | Fork-only (builds on `9b80498`) |
 | `2fa9a62` | Terminal reviewer: `_meta` settingSources/skills isolation (claude) | Filed upstream as [PR #33](https://github.com/Intelligent-Internet/zenith/pull/33), 2026-07-27; no review |
 | `32907a2` | Wave transition events also written to the log | Fork-only (builds on `81aeffd`) |
@@ -186,83 +186,27 @@ probably never exercised against a populated environment:
   (claude/codex/hermes) with a "no-op" branch for the others — check the
   no-op is a decision, not an omission.
 
-## Pending contribution bodies
+## Open upstream PRs from this fork
 
-⚠️ **Decision open** (raised 2026-08-20, unanswered): file these two or drop
-the sections. They were held pending engagement on #26/#31, a condition this
-fork no longer waits on. PR #34 shows this exact shape gets merged, so the
-cost of filing is low — but neither is load-bearing upstream. Delete this
-section once resolved.
+Filed because the change is self-contained, has a clear defect and a test,
+and costs nothing here if it merges. Delete a row once it resolves; if one
+merges, drop the branch it was filed from — locally and on `fork` — since
+upstream then serves the content. Check with
+`gh pr view <n> --repo Intelligent-Internet/zenith`, never a local branch's
+position.
 
-### `6c3fbb8` — ruff rule-set pin (branch `upstream/ruff-rule-pin`)
+| PR | Commit here | Branch | Filed |
+| --- | --- | --- | --- |
+| [#38](https://github.com/Intelligent-Internet/zenith/pull/38) | `c76b945` | `upstream/acp-command-cascade` | 2026-08-20 |
+| [#33](https://github.com/Intelligent-Internet/zenith/pull/33) | `2fa9a62` | `upstream/terminal-reviewer-isolation` | 2026-07-27 |
+| [#32](https://github.com/Intelligent-Internet/zenith/pull/32) | `ea38d25` | (branch not retained) | 2026-07-27 |
+| [#31](https://github.com/Intelligent-Internet/zenith/pull/31) | `9b80498` | (branch not retained) | 2026-07-26 |
+| [#26](https://github.com/Intelligent-Internet/zenith/pull/26) | `385d0ac` | (branch not retained) | 2026-07-18 |
 
-Branch is cut from `origin/main` @ `a21c071` and carries only the
-`pyproject.toml` change; numbers below are measured on that base — 56
-findings, not the 62 seen on `local/integration`, the difference being this
-fork's own 6. Title:
-`chore(lint): pin the ruff rule set so CI stops drifting with the ruff release`
+None has a review. Expect none; #31 and #26 are the design-level pair whose
+silence drove the split. They stay open at no cost.
 
-```markdown
-## Problem
-
-`[tool.ruff]` in `zenith/pyproject.toml` sets only `target-version` and
-`line-length`. It never pins a `select`, so the enabled rule set is whatever
-the installed ruff binary happens to default to — and that default changed:
-ruff <0.16 enabled ~123 rules, 0.16.0 enables ~831 (`ruff check --show-settings`).
-
-Same tree, same config file, different verdict:
-
-    cd zenith && uv run ruff check .   # ruff 0.15.6 from uv.lock -> All checks passed
-    uvx ruff check .                   # ruff 0.16.0             -> Found 56 errors
-
-CI is green today only because `uv.lock` pins ruff 0.15.6 against a `ruff>=0.4`
-spec. A single `uv lock --upgrade` — or any contributor with a newer ruff on
-`PATH` — pulls 0.16.x and surfaces 56 findings across `src/` and `tests/`, all
-of it long-standing code that no open PR touched. That turns a routine lock
-refresh into an unrelated 56-item cleanup, and it makes "does lint pass?"
-un-answerable without knowing which ruff someone ran.
-
-## Fix
-
-Make the contract explicit instead of version-dependent:
-
-- `[tool.ruff.lint] select = ["E4", "E7", "E9", "F"]` — ruff's own pre-0.16
-  default, written down. No rule changes state, so no existing code is
-  affected.
-- `required-version = ">=0.15,<0.16"` — a mismatched binary now aborts with a
-  clear cause rather than silently linting under a different rule set.
-
-`uv.lock` is deliberately untouched.
-
-## Verification
-
-Same ruff 0.16.0 binary, in isolation:
-
-    ruff check . --isolated --target-version py311 --line-length 100 \
-      --select E4,E7,E9,F        -> All checks passed
-    ruff check . --isolated --target-version py311 --line-length 100
-                                 -> Found 56 errors
-
-With the change in place: `uv run ruff check .` clean, `uv run mypy src` clean
-(17 source files), `uv run pytest -q` 212 passed / 7 skipped (pre-existing
-real-agent smoke skips).
-
-## Alternative
-
-If you would rather *adopt* the expanded 0.16 rule set than freeze the old one,
-that is the opposite change: select the new rules deliberately and fix all 56
-findings in one sweep. It is much larger and touches code across the tree, so
-it seems worth an issue and a decision first. This PR is the conservative
-option — it locks in today's behavior and can be reverted in one line if you
-take the other path.
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-```
-
-### `c76b945` — ACP command cascade (branch `upstream/acp-command-cascade`)
-
-Title:
-`fix(config): custom worker ACP command cascades to same-provider validator/reviewer`
+### PR #38 body as filed
 
 ```markdown
 ## Problem
@@ -314,8 +258,9 @@ use provider defaults throughout.
 - Consistency: `ProviderSelection` round-tripped through `env()` must
   resolve identically in `HarnessConfig` (fails before the fix).
 
-`uv run pytest`: 216 passed, 7 skipped (pre-existing real-agent smoke
-skips) on top of `main`.
+On top of `main` @ 2c26f6a: `uv run ruff check .` clean, `uv run mypy src`
+clean (17 source files), `uv run pytest -q` 217 passed / 7 skipped
+(pre-existing real-agent smoke skips).
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 ```
