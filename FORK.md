@@ -23,6 +23,15 @@ PR-first development untenable (at the time: one upstream merge in 24 days,
   drop the local copy to minimize drift.
 - Keep the delta table below current: add a row when a change merges to
   `local/integration`, update it when upstream merges/rejects anything.
+- Sync upstream with `git sync-upstream` (alias, `--test` to run the checks
+  after): it fetches `origin`, refuses unless the working tree is clean and
+  HEAD is `local/integration`, and merges `origin/main` in. It never moves a
+  branch ref. It replaced `rebuild-integration` on 2026-08-20, which rebuilt
+  `local/integration` from `main` + a hardcoded topic-branch list — a model
+  that stopped matching reality once commits landed on the branch directly,
+  and whose `git branch -f local/integration main` would have discarded every
+  commit on the branch (45 at the time) before failing on the deleted
+  `stephan/reasoning-effort-cli` its list still named.
 
 ### Carried upstream PRs — keep no snapshot branches
 
@@ -42,10 +51,14 @@ git fetch origin pull/14/head:pr-14   # PR number → throwaway local branch
 Currently carried: **#14 → `3ddf1a6`** (declined upstream — a permanent
 fork delta, not a pending cherry-pick), **#25 → `6017363`** (still open
 upstream), **#35 → `3646100` + `5121352`** (still open upstream; carried
-from head `f704a8d`), and **#36 → `6873b77`** (still open upstream; carried
-from head `70993ec`, fixed up in `0cc7936`). Patch-ids differ from the PR
-heads (rebased onto the fork line); authorship is preserved, so
-`git log --format='%an'` still shows the upstream author.
+from head `f704a8d`), **#36 → `6873b77`** (still open upstream; carried
+from head `70993ec`, fixed up in `0cc7936`), and **#23 → `9ff873d` +
+`ff10c54`** (still open upstream; carried from head `3404285`, guarded by
+`2cc3b5b`). Patch-ids differ from the PR heads (rebased onto the fork
+line); authorship is preserved, so `git log --format='%an'` still shows the
+upstream author — including where upstream itself recorded a placeholder
+(#23's first commit is authored `Temporary User <temp@example.com>`
+upstream; it is carried as found rather than reassigned).
 
 **When a carried PR gets new commits.** Refetch the head, diff it against
 what was carried, and take only the delta:
@@ -138,6 +151,9 @@ change or depends on unmerged work).
 
 | Commit | Change | Upstream status |
 | --- | --- | --- |
+| `2cc3b5b` | `zenith init --scope user` refuses the model, reasoning-effort, and `--log-level`/`--log-file` flags instead of accepting them and writing nothing | fork-only, and **only half a fork concern**: user scope assembles no `cli_env`, so upstream's own model and effort flags are dropped just as silently there. Offer upstream if #23 gets engagement — the fork-specific part is just the two log flags. Sits after #23's own argument checks so its `test_user_scope_argument_errors_happen_before_writes` ordering still holds |
+| `ff10c54` | Cherry-pick of upstream [PR #23](https://github.com/Intelligent-Internet/zenith/pull/23), commit 2 (validate Codex managed-block boundaries) | open upstream since 2026-07-20; carried from head `3404285`. Applied clean |
+| `9ff873d` | Cherry-pick of upstream [PR #23](https://github.com/Intelligent-Internet/zenith/pull/23), commit 1 (`zenith init --scope user`: user-scoped MCP registration in `~/.claude.json` / `$CODEX_HOME/config.toml`, host agents/playbooks/prompt, personal `/zenith` skill) | open upstream since 2026-07-20; carried from head `3404285`. Based on `feb1d62`, i.e. before #17 and #34 — one conflict in `init`, resolved by keeping this fork's model-pin `shadowed`/`discover()` block from `3646100` and dropping its leading `workspace = Path(workspace_dir)` line, which #23 moves past the `--scope user` early return and re-defaults from `"."` to `None`. Authored upstream as `Temporary User <temp@example.com>` — that is the identity in `b2bc962`, preserved as found. User scope writes no `_forwarded_runtime_env()` and no `cli_env`; see `2cc3b5b` |
 | `0cc7936` | Bounded-dispatch fix-ups: reconcile writes the durable markdown mirror (`save_attempt`) instead of only reading the worker's JSON, and an abandoned dispatch thread re-stamps the `.dispatched` markers it owns while it runs | fork-only, but **both are defects in PR #36 as filed, not fork interactions** — verified against `origin/main`, where `_evaluate_gate` cites `attempt_report_path` just the same (so gate reports named an unwritten file for every task that outlived its dispatch wait), and where `attempt_stale_s` measures elapsed time rather than liveness (a worker slower than 6h — the case bounded dispatch exists for — read as lost). Offer upstream if #36 ever gets engagement. The test-fixture half *is* a fork interaction: #36's tasks named `skill="s"`, which the carried #14 validation rejects at `submit_plan` |
 | `6873b77` | Cherry-pick of upstream [PR #36](https://github.com/Intelligent-Internet/zenith/pull/36) (bounded dispatch wait: `StepResult.in_progress`, `.dispatched` markers, `ZENITH_DISPATCH_WAIT_S`/`ZENITH_ATTEMPT_STALE_S`) | open upstream since 2026-08-12; carried from head `70993ec`. Fixed up in `0cc7936` — do not carry it without those. Reviewed against the carried #25 (`6017363`): safe, because the timeout path discards only the dispatch *return value*, so an abandoned thread touches nothing but its own attempt JSON and never `task-state.json`; the next wave sees a fresh marker and skips the task as in-flight rather than stubbing an in-flight validator, which was #25's failure mode. Our `81aeffd` heartbeat is now belt-and-braces for `advance_project` but still load-bearing for `end_mission`, which still blocks on terminal review |
 | `5121352` | Cherry-pick of upstream [PR #35](https://github.com/Intelligent-Internet/zenith/pull/35), commit 2 (per-role model pin: `ZENITH_{WORKER,VALIDATOR,TERMINAL_REVIEWER}_MODEL` + `--*-model` flags) | open upstream since 2026-08-09; carried from head `f704a8d`. **Adapted for #31**, which the PR body anticipated: the codex pin is set as an explicit layer-3 `CODEX_CONFIG` key (with `sandbox_mode`/`approval_policy`/`model_reasoning_effort`) instead of riding argv, which the npm codex-acp adapter ignores. Layer 3 rather than layer 2 so the resolved role value outranks an ambient `CODEX_CONFIG` model and one spliced into `ZENITH_*_ACP_COMMAND`, independent of `-c` ordering in the command string. Five fork tests cover that channel; the PR's own tests only reached argv |
