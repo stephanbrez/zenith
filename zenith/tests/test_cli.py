@@ -2023,6 +2023,33 @@ class TestUserScopeInit:
         assert "use --scope project for hermes" in unsupported.output
         assert list(user_home.iterdir()) == []
 
+    @pytest.mark.parametrize(
+        ("flag", "value"),
+        [
+            ("--worker-reasoning-effort", "high"),
+            ("--validator-model", "gpt-5.5"),
+            ("--log-level", "DEBUG"),
+            ("--log-file", "zenith.log"),
+        ],
+    )
+    def test_user_scope_rejects_flags_it_would_not_persist(
+        self,
+        runner: CliRunner,
+        user_home: Path,
+        env: dict[str, str],
+        flag: str,
+        value: str,
+    ) -> None:
+        # These flags only ever reach the config through cli_env, which user
+        # scope does not write. Silently accepting one would report success
+        # while the setting vanished, so init must refuse before writing.
+        result = runner.invoke(
+            cli, ["init", "--scope", "user", "--agent", "codex", flag, value]
+        )
+        assert result.exit_code != 0
+        assert f"{flag} cannot be used with --scope user" in result.output
+        assert list(user_home.iterdir()) == []
+
     def test_registered_command_launches_from_another_workspace(
         self,
         runner: CliRunner,

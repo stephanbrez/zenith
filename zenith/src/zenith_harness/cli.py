@@ -220,6 +220,33 @@ def init(
                 f"--scope user supports these orchestrators: {supported}; "
                 f"use --scope project for {selection.orchestrator.name}"
             )
+        # User scope writes only the provider selection and storage paths — it
+        # deliberately persists no model, no reasoning effort, and no ambient
+        # runtime env, so a host config installed once cannot freeze settings
+        # for every workspace. The flags below feed exactly that omitted set
+        # (see cli_env in the project branch), so accepting them here would
+        # take a flag and write nothing. Refuse instead of dropping silently.
+        ignored = [
+            flag
+            for flag, value in (
+                ("--worker-reasoning-effort", worker_reasoning_effort),
+                ("--validator-reasoning-effort", validator_reasoning_effort),
+                ("--terminal-reviewer-reasoning-effort", terminal_reviewer_reasoning_effort),
+                ("--worker-model", worker_model),
+                ("--validator-model", validator_model),
+                ("--terminal-reviewer-model", terminal_reviewer_model),
+                ("--log-level", log_level),
+                ("--log-file", log_file),
+            )
+            if value
+        ]
+        if ignored:
+            raise click.UsageError(
+                f"{', '.join(ignored)} cannot be used with --scope user; "
+                "user scope persists no model, reasoning effort, or logging "
+                "setting — pass these per workspace with --scope project, or "
+                "export the matching ZENITH_* variable for the host session"
+            )
         storage_env = _storage_env(
             zenith_home=zenith_home,
             workspace=Path.cwd(),
